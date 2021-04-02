@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/daotl/go-datastore/key"
+
 	"github.com/daotl/go-bitswap/internal/testutil"
 	message "github.com/daotl/go-bitswap/message"
 	pb "github.com/daotl/go-bitswap/message/pb"
@@ -96,7 +98,11 @@ func newTestEngine(ctx context.Context, idStr string) engineSet {
 
 func newTestEngineWithSampling(ctx context.Context, idStr string, peerSampleInterval time.Duration, sampleCh chan struct{}) engineSet {
 	fpt := &fakePeerTagger{}
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		panic(err.Error())
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	e := newEngine(bs, 4, fpt, "localhost", 0, NewTestScoreLedger(peerSampleInterval, sampleCh))
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	return engineSet{
@@ -185,7 +191,11 @@ func peerIsPartner(p peer.ID, e *Engine) bool {
 func TestOutboxClosedWhenEngineClosed(t *testing.T) {
 	ctx := context.Background()
 	t.SkipNow() // TODO implement *Engine.Close
-	e := newEngine(blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), 4, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEngine(blockstore.NewBlockstore(dssync.MutexWrap(mapDs)), 4, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -206,7 +216,12 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 	alphabet := "abcdefghijklmnopqrstuvwxyz"
 	vowels := "aeiou"
 
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	for _, letter := range strings.Split(alphabet, "") {
 		block := blocks.NewBlock([]byte(letter))
 		if err := bs.Put(block); err != nil {
@@ -543,8 +558,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 
 func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 	alphabet := "abcdefghijklmnopqrstuvwxyz"
-
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	for _, letter := range strings.Split(alphabet, "") {
 		block := blocks.NewBlock([]byte(letter))
 		if err := bs.Put(block); err != nil {
@@ -842,8 +860,11 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 			alphabet[25:25], stringsComplement(alphabet[25:25], vowels),
 		},
 	}
-
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	for _, letter := range alphabet {
 		block := blocks.NewBlock([]byte(letter))
 		if err := bs.Put(block); err != nil {
@@ -875,7 +896,11 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 }
 
 func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
@@ -919,7 +944,11 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 }
 
 func TestSendDontHave(t *testing.T) {
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
@@ -983,7 +1012,11 @@ func TestSendDontHave(t *testing.T) {
 }
 
 func TestWantlistForPeer(t *testing.T) {
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(mapDs))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 

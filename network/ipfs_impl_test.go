@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ds "github.com/daotl/go-datastore"
+	"github.com/daotl/go-datastore/key"
 	mockrouting "github.com/daotl/go-ipfs-routing/mock"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -266,7 +267,11 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh1 := &ErrHost{Host: h1}
-	routing1 := mr.ClientWithDatastore(context.TODO(), p1, ds.NewMapDatastore())
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing1 := mr.ClientWithDatastore(context.TODO(), p1, mapDs)
 	bsnet1 := bsnet.NewFromIpfsHost(eh1, routing1)
 	bsnet1.SetDelegate(r1)
 	if r1.listener != nil {
@@ -279,7 +284,11 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh2 := &ErrHost{Host: h2}
-	routing2 := mr.ClientWithDatastore(context.TODO(), p2, ds.NewMapDatastore())
+	mapDs, err = ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing2 := mr.ClientWithDatastore(context.TODO(), p2, mapDs)
 	bsnet2 := bsnet.NewFromIpfsHost(eh2, routing2)
 	bsnet2.SetDelegate(r2)
 	if r2.listener != nil {
