@@ -28,11 +28,11 @@ func (pn *peernet) Adapter(p tnet.Identity, opts ...bsnet.NetOpt) bsnet.BitSwapN
 	if err != nil {
 		panic(err.Error())
 	}
-	st, err := ds.NewMapDatastore(key.KeyTypeBytes)
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
 	if err != nil {
 		panic(err.Error())
 	}
-	routing := pn.routingserver.ClientWithDatastore(context.TODO(), p, st)
+	routing := pn.routingserver.ClientWithDatastore(context.TODO(), p, mapDs)
 	return bsnet.NewFromIpfsHost(client, routing, opts...)
 }
 

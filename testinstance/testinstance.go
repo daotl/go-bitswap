@@ -113,11 +113,11 @@ func NewInstance(ctx context.Context, net tn.Network, p tnet.Identity, netOption
 	bsdelay := delay.Fixed(0)
 
 	adapter := net.Adapter(p, netOptions...)
-	st, err := ds.NewMapDatastore(key.KeyTypeBytes)
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
 	if err != nil {
 		panic(err.Error())
 	}
-	dstore := ds_sync.MutexWrap(delayed.New(st, bsdelay))
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 
 	bstore, err := blockstore.CachedBlockstore(ctx,
 		blockstore.NewBlockstore(ds_sync.MutexWrap(dstore)),
