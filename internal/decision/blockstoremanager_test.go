@@ -9,6 +9,7 @@ import (
 
 	ds "github.com/daotl/go-datastore"
 	"github.com/daotl/go-datastore/delayed"
+	"github.com/daotl/go-datastore/key"
 	ds_sync "github.com/daotl/go-datastore/sync"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
@@ -22,7 +23,11 @@ import (
 func TestBlockstoreManagerNotFoundKey(t *testing.T) {
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
-	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	bsm := newBlockstoreManager(bstore, 5)
@@ -61,7 +66,11 @@ func TestBlockstoreManagerNotFoundKey(t *testing.T) {
 func TestBlockstoreManager(t *testing.T) {
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
-	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	bsm := newBlockstoreManager(bstore, 5)
@@ -144,7 +153,11 @@ func TestBlockstoreManager(t *testing.T) {
 func TestBlockstoreManagerConcurrency(t *testing.T) {
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
-	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	workerCount := 5
@@ -158,7 +171,7 @@ func TestBlockstoreManagerConcurrency(t *testing.T) {
 		ks = append(ks, b.Cid())
 	}
 
-	err := bstore.PutMany(blks)
+	err = bstore.PutMany(blks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +200,11 @@ func TestBlockstoreManagerClose(t *testing.T) {
 	ctx := context.Background()
 	delayTime := 20 * time.Millisecond
 	bsdelay := delay.Fixed(delayTime)
-	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	bsm := newBlockstoreManager(bstore, 3)
@@ -200,7 +217,7 @@ func TestBlockstoreManagerClose(t *testing.T) {
 		ks = append(ks, b.Cid())
 	}
 
-	err := bstore.PutMany(blks)
+	err = bstore.PutMany(blks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +240,11 @@ func TestBlockstoreManagerClose(t *testing.T) {
 func TestBlockstoreManagerCtxDone(t *testing.T) {
 	delayTime := 20 * time.Millisecond
 	bsdelay := delay.Fixed(delayTime)
-
-	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	mapDs, err := ds.NewMapDatastore(key.KeyTypeString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstore := ds_sync.MutexWrap(delayed.New(mapDs, bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	bsm := newBlockstoreManager(bstore, 3)
@@ -237,7 +257,7 @@ func TestBlockstoreManagerCtxDone(t *testing.T) {
 		ks = append(ks, b.Cid())
 	}
 
-	err := bstore.PutMany(blks)
+	err = bstore.PutMany(blks)
 	if err != nil {
 		t.Fatal(err)
 	}
