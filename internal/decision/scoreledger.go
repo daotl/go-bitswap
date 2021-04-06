@@ -163,7 +163,7 @@ func (dsl *DefaultScoreLedger) scoreWorker() {
 			l.lock.Lock()
 
 			// Update the short-term score.
-			if !l.lastExchange.Before(lastShortUpdate) {
+			if l.lastExchange.After(lastShortUpdate) {
 				l.shortScore = ewma(l.shortScore, shortTermScore, shortTermAlpha)
 			} else {
 				l.shortScore = ewma(l.shortScore, 0, shortTermAlpha)
