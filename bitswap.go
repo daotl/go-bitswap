@@ -10,16 +10,17 @@ import (
 	"time"
 
 	blockstore "github.com/daotl/go-ipfs-blockstore"
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
-	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	logging "github.com/ipfs/go-log"
-	metrics "github.com/ipfs/go-metrics-interface"
+	"github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p-core/peer"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
 	deciface "github.com/daotl/go-bitswap/decision"
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"
 	"github.com/daotl/go-bitswap/internal/decision"
@@ -114,6 +115,14 @@ func SetSendDontHaves(send bool) Option {
 func WithScoreLedger(scoreLedger deciface.ScoreLedger) Option {
 	return func(bs *Bitswap) {
 		bs.engineScoreLedger = scoreLedger
+	}
+}
+
+// WithACFilter sets the ACFilter used for exchange channel access control in
+// the Bitswap instance.
+func WithACFilter(filter ac.ACFilter) Option {
+	return func(bs *Bitswap) {
+		// TODO:
 	}
 }
 
@@ -304,15 +313,28 @@ type counters struct {
 	messagesRecvd  uint64
 }
 
-// GetBlock attempts to retrieve a particular block from peers within the
-// deadline enforced by the context.
+// GetBlock attempts to retrieve a particular public block from peers within
+// the deadline enforced by the context.
 func (bs *Bitswap) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, error) {
+	return bs.GetBlockFromChannel(parent, exchange.PublicChannel, k)
+}
+
+// GetBlockFromChannel attempts to retrieve a particular block from the specified
+// exchange channel from peers within the deadline enforced by the context.
+func (bs *Bitswap) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
+	blocks.Block, error) {
 	return bsgetter.SyncGetBlock(parent, k, bs.GetBlocks)
 }
 
-// WantlistForPeer returns the currently understood list of blocks requested by a
-// given peer.
+// WantlistForPeer returns the currently understood list of public blocks
+// requested by a given peer.
 func (bs *Bitswap) WantlistForPeer(p peer.ID) []cid.Cid {
+	return bs.WantlistForPeerAndChannel(p, exchange.PublicChannel)
+}
+
+// WantlistForPeerAndChannel returns the currently understood list of blocks
+// requested from a specified channel by a given peer.
+func (bs *Bitswap) WantlistForPeerAndChannel(p peer.ID, ch exchange.Channel) []cid.Cid {
 	var out []cid.Cid
 	for _, e := range bs.engine.WantlistForPeer(p) {
 		out = append(out, e.Cid)
@@ -326,7 +348,7 @@ func (bs *Bitswap) LedgerForPeer(p peer.ID) *decision.Receipt {
 	return bs.engine.LedgerForPeer(p)
 }
 
-// GetBlocks returns a channel where the caller may receive blocks that
+// GetBlocks returns a channel where the caller may receive public blocks that
 // correspond to the provided |keys|. Returns an error if BitSwap is unable to
 // begin this request within the deadline enforced by the context.
 //
@@ -334,14 +356,35 @@ func (bs *Bitswap) LedgerForPeer(p peer.ID) *decision.Receipt {
 // resources, provide a context with a reasonably short deadline (ie. not one
 // that lasts throughout the lifetime of the server)
 func (bs *Bitswap) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
+	return bs.GetBlocksFromChannel(ctx, exchange.PublicChannel, keys)
+}
+
+// GetBlocksFromChannel returns a channel where the caller may receive blocks
+// that correspond to the provided |keys| from the specified exchange channel.
+// Returns an error if BitSwap is unable to begin this request within the
+// deadline enforced by the context.
+//
+// NB: Your request remains open until the context expires. To conserve
+// resources, provide a context with a reasonably short deadline (ie. not one
+// that lasts throughout the lifetime of the server)
+func (bs *Bitswap) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
+	<-chan blocks.Block, error) {
 	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
 	return session.GetBlocks(ctx, keys)
 }
 
-// HasBlock announces the existence of a block to this bitswap service. The
-// service will potentially notify its peers.
+// HasBlock announces the existence of a public block to this bitswap service.
+// The service will potentially notify its peers.
 func (bs *Bitswap) HasBlock(blk blocks.Block) error {
-	return bs.receiveBlocksFrom(context.Background(), "", []blocks.Block{blk}, nil, nil)
+	return bs.HasBlockInChannel(exchange.PublicChannel, blk)
+}
+
+// HasBlockInChannel announces the existence of a block in the specified Bitswap
+// channel to this bitswap service.
+// The service will potentially notify its peers.
+func (bs *Bitswap) HasBlockInChannel(ch exchange.Channel, blk blocks.Block) error {
+	return bs.receiveBlocksFrom(context.Background(), "", []blocks.Block{blk},
+		nil, nil)
 }
 
 // TODO: Some of this stuff really only needs to be done when adding a block
@@ -549,19 +592,35 @@ func (bs *Bitswap) Close() error {
 	return bs.process.Close()
 }
 
-// GetWantlist returns the current local wantlist (both want-blocks and
-// want-haves).
+// GetWantlist returns the current local wantlist for the default public exchanged
+// channel (both want-blocks and want-haves).
 func (bs *Bitswap) GetWantlist() []cid.Cid {
+	return bs.GetWantlistForChannel(exchange.PublicChannel)
+}
+
+// GetWantlistForChannel returns the current local wantlist for the specified
+// channel (both want-blocks and want-haves).
+func (bs *Bitswap) GetWantlistForChannel(ch exchange.Channel) []cid.Cid {
 	return bs.pm.CurrentWants()
 }
 
-// GetWantBlocks returns the current list of want-blocks.
+// GetWantBlocks returns the current list of want-blocks for the default public exchange channel.
 func (bs *Bitswap) GetWantBlocks() []cid.Cid {
+	return bs.GetWantBlocksForChannel(exchange.PublicChannel)
+}
+
+// GetWantBlocksForChannel returns the current list of want-blocks for the specified channel.
+func (bs *Bitswap) GetWantBlocksForChannel(ch exchange.Channel) []cid.Cid {
 	return bs.pm.CurrentWantBlocks()
 }
 
-// GetWanthaves returns the current list of want-haves.
+// GetWantHaves returns the current list of want-haves for the default public exchange channel.
 func (bs *Bitswap) GetWantHaves() []cid.Cid {
+	return bs.GetWantHavesForChannel(exchange.PublicChannel)
+}
+
+// GetWantHavesForChannel returns the current list of want-haves for the specified channel.
+func (bs *Bitswap) GetWantHavesForChannel(ch exchange.Channel) []cid.Cid {
 	return bs.pm.CurrentWantHaves()
 }
 

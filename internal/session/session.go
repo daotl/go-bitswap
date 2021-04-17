@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
@@ -228,15 +229,29 @@ func (s *Session) logReceiveFrom(from peer.ID, interestedKs []cid.Cid, haves []c
 	}
 }
 
-// GetBlock fetches a single block.
+// GetBlock fetches a single public block.
 func (s *Session) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, error) {
+	return s.GetBlockFromChannel(parent, exchange.PublicChannel, k)
+}
+
+// GetBlockFromChannel fetches a single block form the specified exchange channel.
+func (s *Session) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
+	blocks.Block, error) {
 	return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
 }
 
-// GetBlocks fetches a set of blocks within the context of this session and
-// returns a channel that found blocks will be returned on. No order is
+// GetBlocks fetches a set of public blocks within the context of this session
+// and returns a channel that found blocks will be returned on. No order is
 // guaranteed on the returned blocks.
 func (s *Session) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
+	return s.GetBlocksFromChannel(ctx, exchange.PublicChannel, keys)
+}
+
+// GetBlocksFromChannel fetches a set of blocks from the specified exchange
+// channel within the context of/this/session and returns a channel that found
+// blocks will be returned on. No order is guaranteed on the returned blocks.
+func (s *Session) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
+	<-chan blocks.Block, error) {
 	ctx = logging.ContextWithLoggable(ctx, s.uuid)
 
 	return bsgetter.AsyncGetBlocks(ctx, s.ctx, keys, s.notif,

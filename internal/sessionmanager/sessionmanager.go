@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
-	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"

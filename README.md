@@ -135,6 +135,32 @@ var exchange bitswap.Bitswap
 err := exchange.HasBlock(blk)
 ```
 
+### Access Control
+
+This fork additionally supports access control feature.
+
+`Channel` from `github.com/daotl/go-ipfs-exchange-ipfs` represents an exchange
+channel within which blocks can be exchanged possibly with access control.
+
+In additional to the original APIs in the above examples which target the default
+public channel, this fork added a new set of APIs which target a specific exchange channel:
+- `GetBlockFromChannel`
+- `WantlistForPeerAndChannel`
+- `GetBlocksFromChannel`
+- `HasBlockInChannel`
+- `GetWantlistForChannel`
+- `GetWantBlocksForChannel`
+- `GetWantHavesForChannel`
+
+Bitswap can be configured with `WithACFilter` to use an `ACFilter`:
+
+```type ACFilter func(pid peer.ID, channel exchange.Channel, id cid.Cid) (bool, error)```
+
+Then Bitswap will call configured `ACFilter` at the following lifecycle points: 
+`afterIssueRequest`, `beforeSendWant`, `afterReceivedWant`, `beforeSendResponse`, `afterReceivedBlock` 
+to determine if the requesting peer has the permission to access the specified
+block in the specified exchange channel.
+
 ## Contribute
 
 PRs are welcome!
@@ -145,6 +171,6 @@ Small note: If editing the Readme, please conform to the [standard-readme](https
 
 MIT
 
-Copyright for portions of this fork are held by Juan Batiz-Benet. as part of the original
+Copyright for portions of this fork are held by Juan Batiz-Benet as part of the original
 [go-bitswap](https://github.com/ipfs/go-bitswap) project. All other copyright for this
 fork are held by DAOT Labs. All rights reserved.

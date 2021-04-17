@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
@@ -33,7 +34,15 @@ type fakeSession struct {
 func (*fakeSession) GetBlock(context.Context, cid.Cid) (blocks.Block, error) {
 	return nil, nil
 }
+func (*fakeSession) GetBlockFromChannel(context.Context, exchange.Channel, cid.Cid) (
+	blocks.Block, error) {
+	return nil, nil
+}
 func (*fakeSession) GetBlocks(context.Context, []cid.Cid) (<-chan blocks.Block, error) {
+	return nil, nil
+}
+func (*fakeSession) GetBlocksFromChannel(context.Context, exchange.Channel, []cid.Cid) (
+	<-chan blocks.Block, error) {
 	return nil, nil
 }
 func (fs *fakeSession) ID() uint64 {
