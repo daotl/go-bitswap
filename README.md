@@ -49,6 +49,13 @@ wants those blocks.
 
 `go-bitswap` requires Go >= 1.11 and can be installed using Go modules
 
+## Access Control
+
+引入 channel 的概念。每个 channel 对应一个账本，包含了一些数据 cid 和节点 id，channel 内的数据只有channel内的节点才能访问。
+启动 bitswap 的时候，要提供一个函数 filter(channel channelID, data cid, peer peerID) bool，
+在 afterIssueRequest, beforeSendWant, afterReceivedWant, beforeSendResponse, afterReceivedBlock 几个时间点
+调用这个 filter 函数，来决定是否继续。
+
 ## Usage
 
 ### Initializing a Bitswap Exchange

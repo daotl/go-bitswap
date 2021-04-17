@@ -11,21 +11,21 @@ import (
 
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	logging "github.com/ipfs/go-log"
-	metrics "github.com/ipfs/go-metrics-interface"
+	"github.com/ipfs/go-metrics-interface"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	deciface "github.com/daotl/go-bitswap/decision"
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"
-	decision "github.com/daotl/go-bitswap/internal/decision"
+	"github.com/daotl/go-bitswap/internal/decision"
 	bsgetter "github.com/daotl/go-bitswap/internal/getter"
 	bsmq "github.com/daotl/go-bitswap/internal/messagequeue"
-	notifications "github.com/daotl/go-bitswap/internal/notifications"
+	"github.com/daotl/go-bitswap/internal/notifications"
 	bspm "github.com/daotl/go-bitswap/internal/peermanager"
 	bspqm "github.com/daotl/go-bitswap/internal/providerquerymanager"
 	bssession "github.com/daotl/go-bitswap/internal/session"
@@ -304,8 +304,9 @@ type counters struct {
 	messagesRecvd  uint64
 }
 
-// GetBlock attempts to retrieve a particular block from peers within the
+// GetBlock attempts to retrieve a particular block in a channel from peers within the
 // deadline enforced by the context.
+// TODO: add parameter channelID
 func (bs *Bitswap) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, error) {
 	return bsgetter.SyncGetBlock(parent, k, bs.GetBlocks)
 }
@@ -326,13 +327,14 @@ func (bs *Bitswap) LedgerForPeer(p peer.ID) *decision.Receipt {
 	return bs.engine.LedgerForPeer(p)
 }
 
-// GetBlocks returns a channel where the caller may receive blocks that
-// correspond to the provided |keys|. Returns an error if BitSwap is unable to
+// GetBlocks returns a go channel where the caller may receive blocks that
+// correspond to the provided |keys| and channelID. Returns an error if BitSwap is unable to
 // begin this request within the deadline enforced by the context.
 //
 // NB: Your request remains open until the context expires. To conserve
 // resources, provide a context with a reasonably short deadline (ie. not one
 // that lasts throughout the lifetime of the server)
+// TODO: add parameter channelID
 func (bs *Bitswap) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
 	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
 	return session.GetBlocks(ctx, keys)
@@ -576,6 +578,7 @@ func (bs *Bitswap) IsOnline() bool {
 // method, but the session will use the fact that the requests are related to
 // be more efficient in its requests to peers. If you are using a session
 // from go-blockservice, it will create a bitswap session automatically.
+// TODO: add parameter channelID
 func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
 }
