@@ -13,7 +13,7 @@ import (
 	ds_sync "github.com/daotl/go-datastore/sync"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	process "github.com/jbenet/goprocess"
 

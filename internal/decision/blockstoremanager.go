@@ -7,7 +7,7 @@ import (
 
 	bstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	process "github.com/jbenet/goprocess"
 )
 

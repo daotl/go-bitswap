@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 
 	"github.com/daotl/go-bitswap/internal/testutil"
 )

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 
 	"github.com/daotl/go-bitswap/internal/testutil"

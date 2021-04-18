@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	u "github.com/ipfs/go-ipfs-util"
 

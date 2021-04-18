@@ -5,13 +5,13 @@ import (
 	"sync"
 	"time"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"
-	notifications "github.com/daotl/go-bitswap/internal/notifications"
+	"github.com/daotl/go-bitswap/internal/notifications"
 	bssession "github.com/daotl/go-bitswap/internal/session"
 	bssim "github.com/daotl/go-bitswap/internal/sessioninterestmanager"
 )

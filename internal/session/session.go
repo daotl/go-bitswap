@@ -5,16 +5,16 @@ import (
 	"time"
 
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 	loggables "github.com/libp2p/go-libp2p-loggables"
 	"go.uber.org/zap"
 
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"
 	bsgetter "github.com/daotl/go-bitswap/internal/getter"
-	notifications "github.com/daotl/go-bitswap/internal/notifications"
+	"github.com/daotl/go-bitswap/internal/notifications"
 	bspm "github.com/daotl/go-bitswap/internal/peermanager"
 	bssim "github.com/daotl/go-bitswap/internal/sessioninterestmanager"
 )

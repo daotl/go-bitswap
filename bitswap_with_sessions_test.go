@@ -8,12 +8,12 @@ import (
 
 	mockrouting "github.com/daotl/go-ipfs-routing/mock"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	delay "github.com/ipfs/go-ipfs-delay"
 	tu "github.com/libp2p/go-libp2p-testing/etc"
 
-	bitswap "github.com/daotl/go-bitswap"
+	"github.com/daotl/go-bitswap"
 	bssession "github.com/daotl/go-bitswap/internal/session"
 	testinstance "github.com/daotl/go-bitswap/testinstance"
 	tn "github.com/daotl/go-bitswap/testnet"

@@ -6,7 +6,7 @@ import (
 
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 
 	notifications "github.com/daotl/go-bitswap/internal/notifications"

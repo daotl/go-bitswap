@@ -10,20 +10,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/daotl/go-datastore/key"
-
-	"github.com/daotl/go-bitswap/internal/testutil"
-	message "github.com/daotl/go-bitswap/message"
-	pb "github.com/daotl/go-bitswap/message/pb"
-
 	ds "github.com/daotl/go-datastore"
+	"github.com/daotl/go-datastore/key"
 	dssync "github.com/daotl/go-datastore/sync"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	process "github.com/jbenet/goprocess"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 	libp2ptest "github.com/libp2p/go-libp2p-core/test"
+
+	"github.com/daotl/go-bitswap/internal/testutil"
+	"github.com/daotl/go-bitswap/message"
+	pb "github.com/daotl/go-bitswap/message/pb"
 )
 
 type peerTag struct {

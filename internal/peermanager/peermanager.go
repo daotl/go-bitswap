@@ -5,10 +5,10 @@ import (
 	"sync"
 
 	logging "github.com/ipfs/go-log"
-	"github.com/ipfs/go-metrics-interface"
+	metrics "github.com/ipfs/go-metrics-interface"
 
-	cid "github.com/ipfs/go-cid"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/ipfs/go-cid"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 var log = logging.Logger("bs:peermgr")

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	"go.uber.org/zap"

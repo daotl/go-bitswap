@@ -6,11 +6,11 @@ import (
 	"io"
 
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/libp2p/go-libp2p-core/network"
-	msgio "github.com/libp2p/go-msgio"
+	"github.com/libp2p/go-msgio"
 
 	pb "github.com/daotl/go-bitswap/message/pb"
 	"github.com/daotl/go-bitswap/wantlist"
