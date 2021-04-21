@@ -36,7 +36,8 @@ type SessionFactory func(
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session
+	self peer.ID,
+	ch exchange.Channel) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -84,12 +85,12 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 // session manager.
 func (sm *SessionManager) NewSession(ctx context.Context,
 	provSearchDelay time.Duration,
-	rebroadcastDelay delay.D) exchange.Fetcher {
+	rebroadcastDelay delay.D,
+	ch exchange.Channel) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self)
-
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ch)
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
 		sm.sessions[id] = session

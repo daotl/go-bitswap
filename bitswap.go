@@ -181,8 +181,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		notif notifications.PubSub,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
-		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
+		self peer.ID,
+		ch exchange.Channel) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ch)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -369,7 +370,7 @@ func (bs *Bitswap) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 // that lasts throughout the lifetime of the server)
 func (bs *Bitswap) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
 	<-chan blocks.Block, error) {
-	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
 	return session.GetBlocks(ctx, keys)
 }
 
@@ -636,5 +637,9 @@ func (bs *Bitswap) IsOnline() bool {
 // be more efficient in its requests to peers. If you are using a session
 // from go-blockservice, it will create a bitswap session automatically.
 func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
-	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, exchange.PublicChannel)
+}
+
+func (bs *Bitswap) NewSessionForChannel(ctx context.Context, ch exchange.Channel) exchange.Fetcher {
+	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
 }

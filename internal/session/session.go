@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
@@ -26,6 +27,8 @@ var sflog = log.Desugar()
 const (
 	broadcastLiveWantsLimit = 64
 )
+
+var ErrSessionChannelMismatch = errors.New("request channel must be equal to the session channel")
 
 // PeerManager keeps track of which sessions are interested in which peers
 // and takes care of sending wants for the sessions
@@ -111,6 +114,9 @@ type Session struct {
 	providerFinder ProviderFinder
 	sim            *bssim.SessionInterestManager
 
+	// incoming requests' channel must be equal to this `ch`
+	ch exchange.Channel
+
 	sw  sessionWants
 	sws sessionWantSender
 
@@ -149,7 +155,8 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
+	self peer.ID,
+	ch exchange.Channel) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -171,6 +178,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		ch:                  ch,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -237,6 +245,9 @@ func (s *Session) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, err
 // GetBlockFromChannel fetches a single block form the specified exchange channel.
 func (s *Session) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
 	blocks.Block, error) {
+	if ch != s.ch {
+		return nil, ErrSessionChannelMismatch
+	}
 	return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
 }
 
@@ -252,6 +263,9 @@ func (s *Session) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.
 // blocks will be returned on. No order is guaranteed on the returned blocks.
 func (s *Session) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
 	<-chan blocks.Block, error) {
+	if ch != s.ch {
+		return nil, ErrSessionChannelMismatch
+	}
 	ctx = logging.ContextWithLoggable(ctx, s.uuid)
 
 	return bsgetter.AsyncGetBlocks(ctx, s.ctx, keys, s.notif,
