@@ -144,10 +144,10 @@ func (r *recallWantlist) RemoveType(c cid.Cid, wtype pb.Message_Wantlist_WantTyp
 // Returns true if the want was marked as sent. Returns false if the want wasn't
 // pending.
 func (r *recallWantlist) MarkSent(e wantlist.Entry) bool {
-	if !r.pending.RemoveType(e.Cid, e.WantType) {
+	if !r.pending.RemoveType(e.Key, e.WantType) {
 		return false
 	}
-	r.sent.Add(e.Cid, e.Priority, e.WantType)
+	r.sent.Add(e.Key, e.Priority, e.WantType)
 	return true
 }
 
@@ -552,7 +552,7 @@ func (mq *MessageQueue) simulateDontHaveWithTimeout(wantlist []bsmsg.Entry) {
 		if entry.WantType == pb.Message_Wantlist_Block && entry.SendDontHave {
 			// Unlikely, but just in case check that the block hasn't been
 			// received in the interim
-			c := entry.Cid
+			c := entry.Key
 			if _, ok := mq.peerWants.sent.Contains(c); ok {
 				wants = append(wants, c)
 			}
@@ -622,14 +622,14 @@ func (mq *MessageQueue) logOutgoingMessage(wantlist []bsmsg.Entry) {
 			if e.WantType == pb.Message_Wantlist_Have {
 				log.Debugw("sent message",
 					"type", "CANCEL_WANT_HAVE",
-					"cid", e.Cid,
+					"cid", e.Key,
 					"local", self,
 					"to", mq.p,
 				)
 			} else {
 				log.Debugw("sent message",
 					"type", "CANCEL_WANT_BLOCK",
-					"cid", e.Cid,
+					"cid", e.Key,
 					"local", self,
 					"to", mq.p,
 				)
@@ -638,14 +638,14 @@ func (mq *MessageQueue) logOutgoingMessage(wantlist []bsmsg.Entry) {
 			if e.WantType == pb.Message_Wantlist_Have {
 				log.Debugw("sent message",
 					"type", "WANT_HAVE",
-					"cid", e.Cid,
+					"cid", e.Key,
 					"local", self,
 					"to", mq.p,
 				)
 			} else {
 				log.Debugw("sent message",
 					"type", "WANT_BLOCK",
-					"cid", e.Cid,
+					"cid", e.Key,
 					"local", self,
 					"to", mq.p,
 				)
@@ -686,7 +686,7 @@ func (mq *MessageQueue) extractOutgoingMessage(supportsHave bool) (bsmsg.BitSwap
 		// place if possible.
 		for _, e := range peerEntries {
 			if e.WantType == pb.Message_Wantlist_Have {
-				mq.peerWants.RemoveType(e.Cid, pb.Message_Wantlist_Have)
+				mq.peerWants.RemoveType(e.Key, pb.Message_Wantlist_Have)
 			} else {
 				filteredPeerEntries = append(filteredPeerEntries, e)
 			}
@@ -725,7 +725,7 @@ func (mq *MessageQueue) extractOutgoingMessage(supportsHave bool) (bsmsg.BitSwap
 	}
 
 	for _, e := range peerEntries {
-		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, e.WantType, true)
+		msgSize += mq.msg.AddEntry(e.Key, e.Priority, e.WantType, true)
 		sentPeerEntries++
 
 		if msgSize >= mq.maxMessageSize {
@@ -749,7 +749,7 @@ func (mq *MessageQueue) extractOutgoingMessage(supportsHave bool) (bsmsg.BitSwap
 			wantType = pb.Message_Wantlist_Block
 		}
 
-		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, wantType, false)
+		msgSize += mq.msg.AddEntry(e.Key, e.Priority, wantType, false)
 		sentBcstEntries++
 
 		if msgSize >= mq.maxMessageSize {
@@ -765,15 +765,15 @@ FINISH:
 	for i, e := range peerEntries[:sentPeerEntries] {
 		if !mq.peerWants.MarkSent(e) {
 			// It changed.
-			mq.msg.Remove(e.Cid)
-			peerEntries[i].Cid = cid.Undef
+			mq.msg.Remove(e.Key)
+			peerEntries[i].Key = cid.Undef
 		}
 	}
 
 	for i, e := range bcstEntries[:sentBcstEntries] {
 		if !mq.bcstWants.MarkSent(e) {
-			mq.msg.Remove(e.Cid)
-			bcstEntries[i].Cid = cid.Undef
+			mq.msg.Remove(e.Key)
+			bcstEntries[i].Key = cid.Undef
 		}
 	}
 
@@ -795,14 +795,14 @@ FINISH:
 		defer mq.wllock.Unlock()
 
 		for _, e := range peerEntries[:sentPeerEntries] {
-			if e.Cid.Defined() { // Check if want was cancelled in the interim
-				mq.peerWants.SentAt(e.Cid, now)
+			if e.Key.Defined() { // Check if want was cancelled in the interim
+				mq.peerWants.SentAt(e.Key, now)
 			}
 		}
 
 		for _, e := range bcstEntries[:sentBcstEntries] {
-			if e.Cid.Defined() { // Check if want was cancelled in the interim
-				mq.bcstWants.SentAt(e.Cid, now)
+			if e.Key.Defined() { // Check if want was cancelled in the interim
+				mq.bcstWants.SentAt(e.Key, now)
 			}
 		}
 	}

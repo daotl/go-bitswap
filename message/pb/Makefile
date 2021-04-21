@@ -9,3 +9,5 @@ all: $(GO)
 clean:
 		rm -f *.pb.go
 		rm -f *.go
+build:
+	protoc -I=. --proto_path=C:\Users\zjj\go\pkg\mod\github.com\gogo\protobuf@v1.3.2 --gogofaster_out=. ./message.proto

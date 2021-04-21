@@ -343,7 +343,7 @@ func (bs *Bitswap) WantlistForPeer(p peer.ID) []cid.Cid {
 func (bs *Bitswap) WantlistForPeerAndChannel(p peer.ID, ch exchange.Channel) []cid.Cid {
 	var out []cid.Cid
 	for _, e := range bs.engine.WantlistForPeer(p) {
-		out = append(out, e.Cid)
+		out = append(out, e.Key)
 	}
 	return out
 }

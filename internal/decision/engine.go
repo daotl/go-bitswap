@@ -426,9 +426,9 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		for _, et := range entries {
 			if !et.Cancel {
 				if et.WantType == pb.Message_Wantlist_Have {
-					log.Debugw("Bitswap engine <- want-have", "local", e.self, "from", p, "cid", et.Cid)
+					log.Debugw("Bitswap engine <- want-have", "local", e.self, "from", p, "cid", et.Key)
 				} else {
-					log.Debugw("Bitswap engine <- want-block", "local", e.self, "from", p, "cid", et.Cid)
+					log.Debugw("Bitswap engine <- want-block", "local", e.self, "from", p, "cid", et.Key)
 				}
 			}
 		}
@@ -449,7 +449,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 	wants, cancels := e.splitWantsCancels(entries)
 	wantKs := cid.NewSet()
 	for _, entry := range wants {
-		wantKs.Add(entry.Cid)
+		wantKs.Add(entry.Key)
 	}
 	blockSizes, err := e.bsm.getBlockSizes(ctx, wantKs.Keys())
 	if err != nil {
@@ -471,23 +471,23 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 	// Remove cancelled blocks from the queue
 	for _, entry := range cancels {
-		log.Debugw("Bitswap engine <- cancel", "local", e.self, "from", p, "cid", entry.Cid)
-		if l.CancelWant(entry.Cid) {
-			e.peerRequestQueue.Remove(entry.Cid, p)
+		log.Debugw("Bitswap engine <- cancel", "local", e.self, "from", p, "cid", entry.Key)
+		if l.CancelWant(entry.Key) {
+			e.peerRequestQueue.Remove(entry.Key, p)
 		}
 	}
 
 	// For each want-have / want-block
 	for _, entry := range wants {
-		c := entry.Cid
-		blockSize, found := blockSizes[entry.Cid]
+		c := entry.Key
+		blockSize, found := blockSizes[entry.Key]
 
 		// Add each want-have / want-block to the ledger
 		l.Wants(c, entry.Priority, entry.WantType)
 
 		// If the block was not found
 		if !found {
-			log.Debugw("Bitswap engine: block not found", "local", e.self, "from", p, "cid", entry.Cid, "sendDontHave", entry.SendDontHave)
+			log.Debugw("Bitswap engine: block not found", "local", e.self, "from", p, "cid", entry.Key, "sendDontHave", entry.SendDontHave)
 
 			// Only add the task to the queue if the requester wants a DONT_HAVE
 			if e.sendDontHaves && entry.SendDontHave {
@@ -515,7 +515,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 			isWantBlock := e.sendAsBlock(entry.WantType, blockSize)
 
-			log.Debugw("Bitswap engine: block found", "local", e.self, "from", p, "cid", entry.Cid, "isWantBlock", isWantBlock)
+			log.Debugw("Bitswap engine: block found", "local", e.self, "from", p, "cid", entry.Key, "isWantBlock", isWantBlock)
 
 			// entrySize is the amount of space the entry takes up in the
 			// message we send to the recipient. If we're sending a block, the
@@ -610,7 +610,7 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 				}
 
 				e.peerRequestQueue.PushTasks(l.Partner, peertask.Task{
-					Topic:    entry.Cid,
+					Topic:    entry.Key,
 					Priority: int(entry.Priority),
 					Work:     entrySize,
 					Data: &taskData{

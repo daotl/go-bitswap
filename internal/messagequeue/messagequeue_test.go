@@ -253,7 +253,7 @@ func TestSendingMessagesPriority(t *testing.T) {
 	}
 	byCid := make(map[cid.Cid]message.Entry)
 	for _, entry := range messages[0] {
-		byCid[entry.Cid] = entry
+		byCid[entry.Key] = entry
 	}
 
 	// Check that earliest want-haves have highest priority
@@ -732,11 +732,11 @@ func filterWantTypes(wantlist []bsmsg.Entry) ([]cid.Cid, []cid.Cid, []cid.Cid) {
 	var cls []cid.Cid
 	for _, e := range wantlist {
 		if e.Cancel {
-			cls = append(cls, e.Cid)
+			cls = append(cls, e.Key)
 		} else if e.WantType == pb.Message_Wantlist_Block {
-			wbs = append(wbs, e.Cid)
+			wbs = append(wbs, e.Key)
 		} else {
-			whs = append(whs, e.Cid)
+			whs = append(whs, e.Key)
 		}
 	}
 	return wbs, whs, cls

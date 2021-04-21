@@ -236,7 +236,7 @@ func TestMessageSendAndReceive(t *testing.T) {
 		t.Fatal("Did not add want to received message")
 	}
 	receivedWant := receivedWants[0]
-	if receivedWant.Cid != sentWant.Cid ||
+	if receivedWant.Key != sentWant.Key ||
 		receivedWant.Priority != sentWant.Priority ||
 		receivedWant.Cancel != sentWant.Cancel {
 		t.Fatal("Sent message wants did not match received message wants")
