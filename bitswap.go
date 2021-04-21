@@ -122,7 +122,7 @@ func WithScoreLedger(scoreLedger deciface.ScoreLedger) Option {
 // the Bitswap instance.
 func WithACFilter(filter ac.ACFilter) Option {
 	return func(bs *Bitswap) {
-		// TODO:
+		ac.GlobalFilter = filter
 	}
 }
 
@@ -324,7 +324,12 @@ func (bs *Bitswap) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, er
 // exchange channel from peers within the deadline enforced by the context.
 func (bs *Bitswap) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
 	blocks.Block, error) {
-	return bsgetter.SyncGetBlock(parent, k, bs.GetBlocks)
+	ok, err := ac.GlobalFilter(bs.network.Self(), ch, k)
+	if ok {
+		return bsgetter.SyncGetBlock(parent, k, bs.GetBlocks)
+	} else {
+		return nil, err
+	}
 }
 
 // WantlistForPeer returns the currently understood list of public blocks
@@ -370,6 +375,12 @@ func (bs *Bitswap) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks
 // that lasts throughout the lifetime of the server)
 func (bs *Bitswap) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
 	<-chan blocks.Block, error) {
+	for _, k := range keys {
+		ok, err := ac.GlobalFilter(bs.network.Self(), ch, k)
+		if !ok {
+			return nil, err
+		}
+	}
 	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
 	return session.GetBlocks(ctx, keys)
 }
@@ -640,6 +651,12 @@ func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, exchange.PublicChannel)
 }
 
+// NewSessionForChannel returns nil if self is not in this channel, so remember to check return value
 func (bs *Bitswap) NewSessionForChannel(ctx context.Context, ch exchange.Channel) exchange.Fetcher {
-	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
+	ok, _ := ac.GlobalFilter(bs.network.Self(), ch, cid.Undef)
+	if ok {
+		return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
+	} else {
+		return nil
+	}
 }

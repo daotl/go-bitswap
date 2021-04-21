@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -248,7 +249,12 @@ func (s *Session) GetBlockFromChannel(parent context.Context, ch exchange.Channe
 	if ch != s.ch {
 		return nil, ErrSessionChannelMismatch
 	}
-	return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
+	ok, err := ac.GlobalFilter(s.self, ch, k)
+	if ok {
+		return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
+	} else {
+		return nil, err
+	}
 }
 
 // GetBlocks fetches a set of public blocks within the context of this session
@@ -266,6 +272,14 @@ func (s *Session) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel,
 	if ch != s.ch {
 		return nil, ErrSessionChannelMismatch
 	}
+	// return if any key can't pass
+	for _, key := range keys {
+		ok, err := ac.GlobalFilter(s.self, ch, key)
+		if !ok {
+			return nil, err
+		}
+	}
+
 	ctx = logging.ContextWithLoggable(ctx, s.uuid)
 
 	return bsgetter.AsyncGetBlocks(ctx, s.ctx, keys, s.notif,
