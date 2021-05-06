@@ -3,6 +3,9 @@ package session
 import (
 	"context"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
+	bswl "github.com/daotl/go-bitswap/wantlist"
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 
@@ -33,7 +36,7 @@ const (
 // SessionWantsCanceller provides a method to cancel wants
 type SessionWantsCanceller interface {
 	// Cancel wants for this session
-	CancelSessionWants(sid uint64, wants []cid.Cid)
+	CancelSessionWants(sid uint64, wants []bswl.WantKey)
 }
 
 // update encapsulates a message received by the session
@@ -110,10 +113,12 @@ type sessionWantSender struct {
 	onSend onSendFn
 	// Called when all peers explicitly don't have a block
 	onPeersExhausted onPeersExhaustedFn
+
+	ch exchange.Channel
 }
 
 func newSessionWantSender(sid uint64, pm PeerManager, spm SessionPeerManager, canceller SessionWantsCanceller,
-	bpm *bsbpm.BlockPresenceManager, onSend onSendFn, onPeersExhausted onPeersExhaustedFn) sessionWantSender {
+	bpm *bsbpm.BlockPresenceManager, onSend onSendFn, onPeersExhausted onPeersExhaustedFn, ch exchange.Channel) sessionWantSender {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sws := sessionWantSender{
@@ -133,6 +138,7 @@ func newSessionWantSender(sid uint64, pm PeerManager, spm SessionPeerManager, ca
 		bpm:              bpm,
 		onSend:           onSend,
 		onPeersExhausted: onPeersExhausted,
+		ch:               ch,
 	}
 
 	return sws
@@ -297,7 +303,7 @@ func (sws *sessionWantSender) onChange(changes []change) {
 
 	// If there are any cancels, send them
 	if len(cancels) > 0 {
-		sws.canceller.CancelSessionWants(sws.sessionID, cancels)
+		sws.canceller.CancelSessionWants(sws.sessionID, bswl.CidsToKeys(cancels, sws.ch))
 	}
 
 	// If there are some connected peers, send any pending wants
@@ -445,7 +451,7 @@ func (sws *sessionWantSender) processUpdates(updates []update) []cid.Cid {
 		// Before removing the peer from the session, check if the peer
 		// sent us a HAVE for a block that we want
 		for c := range sws.wants {
-			if sws.bpm.PeerHasBlock(p, c) {
+			if sws.bpm.PeerHasBlock(p, bswl.NewWantKey(c, sws.ch)) {
 				delete(prunePeers, p)
 				break
 			}
@@ -496,8 +502,8 @@ func (sws *sessionWantSender) checkForExhaustedWants(dontHaves []cid.Cid, newlyU
 	// If all available peers for a cid sent a DONT_HAVE, signal to the session
 	// that we've exhausted available peers
 	if len(wants) > 0 {
-		exhausted := sws.bpm.AllPeersDoNotHaveBlock(sws.spm.Peers(), wants)
-		sws.processExhaustedWants(exhausted)
+		exhausted := sws.bpm.AllPeersDoNotHaveBlock(sws.spm.Peers(), bswl.CidsToKeys(wants, sws.ch))
+		sws.processExhaustedWants(bswl.KeysToCids(exhausted))
 	}
 }
 
@@ -585,7 +591,10 @@ func (sws *sessionWantSender) sendWants(sends allWants) {
 		// precedence over want-haves.
 		wblks := snd.wantBlocks.Keys()
 		whaves := snd.wantHaves.Keys()
-		sws.pm.SendWants(sws.ctx, p, wblks, whaves)
+		// do filter before sending wants
+		wblks = ac.FilterCids(wblks, sws.ch, p)
+		whaves = ac.FilterCids(whaves, sws.ch, p)
+		sws.pm.SendWants(sws.ctx, p, bswl.CidsToKeys(wblks, sws.ch), bswl.CidsToKeys(whaves, sws.ch))
 
 		// Inform the session that we've sent the wants
 		sws.onSend(p, wblks, whaves)
@@ -652,12 +661,12 @@ func (sws *sessionWantSender) updateWantBlockPresence(c cid.Cid, p peer.ID) {
 	if !ok {
 		return
 	}
-
+	k := bswl.NewWantKey(c, sws.ch)
 	// If the peer sent us a HAVE or DONT_HAVE for the cid, adjust the
 	// block presence for the peer / cid combination
-	if sws.bpm.PeerHasBlock(p, c) {
+	if sws.bpm.PeerHasBlock(p, k) {
 		wi.setPeerBlockPresence(p, BPHave)
-	} else if sws.bpm.PeerDoesNotHaveBlock(p, c) {
+	} else if sws.bpm.PeerDoesNotHaveBlock(p, k) {
 		wi.setPeerBlockPresence(p, BPDontHave)
 	} else {
 		wi.setPeerBlockPresence(p, BPUnknown)

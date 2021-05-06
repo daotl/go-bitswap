@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	bsgetter "github.com/daotl/go-bitswap/internal/getter"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
@@ -24,7 +26,6 @@ import (
 	deciface "github.com/daotl/go-bitswap/decision"
 	bsbpm "github.com/daotl/go-bitswap/internal/blockpresencemanager"
 	"github.com/daotl/go-bitswap/internal/decision"
-	bsgetter "github.com/daotl/go-bitswap/internal/getter"
 	bsmq "github.com/daotl/go-bitswap/internal/messagequeue"
 	"github.com/daotl/go-bitswap/internal/notifications"
 	bspm "github.com/daotl/go-bitswap/internal/peermanager"
@@ -157,7 +158,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	// has an old version of Bitswap that doesn't support DONT_HAVE messages,
 	// or when no response is received within a timeout.
 	var sm *bssm.SessionManager
-	onDontHaveTimeout := func(p peer.ID, dontHaves []cid.Cid) {
+	onDontHaveTimeout := func(p peer.ID, dontHaves []wl.WantKey) {
 		// Simulate a message arriving with DONT_HAVEs
 		sm.ReceiveFrom(ctx, p, nil, nil, dontHaves)
 	}
@@ -325,11 +326,12 @@ func (bs *Bitswap) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, er
 func (bs *Bitswap) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
 	blocks.Block, error) {
 	ok, err := ac.GlobalFilter(bs.network.Self(), ch, k)
-	if ok {
-		return bsgetter.SyncGetBlock(parent, k, bs.GetBlocks)
-	} else {
+	if !ok {
 		return nil, err
 	}
+	return bsgetter.SyncGetBlock(parent, k, func(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+		return bs.GetBlocksFromChannel(ctx, ch, cids)
+	})
 }
 
 // WantlistForPeer returns the currently understood list of public blocks
@@ -343,7 +345,10 @@ func (bs *Bitswap) WantlistForPeer(p peer.ID) []cid.Cid {
 func (bs *Bitswap) WantlistForPeerAndChannel(p peer.ID, ch exchange.Channel) []cid.Cid {
 	var out []cid.Cid
 	for _, e := range bs.engine.WantlistForPeer(p) {
-		out = append(out, e.Key)
+		if e.Key.Ch == ch {
+
+			out = append(out, e.Key.Cid)
+		}
 	}
 	return out
 }
@@ -378,11 +383,13 @@ func (bs *Bitswap) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel
 	for _, k := range keys {
 		ok, err := ac.GlobalFilter(bs.network.Self(), ch, k)
 		if !ok {
-			return nil, err
+			recv := make(chan blocks.Block)
+			close(recv)
+			return recv, err
 		}
 	}
 	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
-	return session.GetBlocks(ctx, keys)
+	return session.GetBlocksFromChannel(ctx, ch, keys)
 }
 
 // HasBlock announces the existence of a public block to this bitswap service.
@@ -395,7 +402,7 @@ func (bs *Bitswap) HasBlock(blk blocks.Block) error {
 // channel to this bitswap service.
 // The service will potentially notify its peers.
 func (bs *Bitswap) HasBlockInChannel(ch exchange.Channel, blk blocks.Block) error {
-	return bs.receiveBlocksFrom(context.Background(), "", []blocks.Block{blk},
+	return bs.receiveBlocksFrom(context.Background(), "", []bsmsg.MsgBlock{bsmsg.NewMsgBlock(blk, ch)},
 		nil, nil)
 }
 
@@ -403,18 +410,30 @@ func (bs *Bitswap) HasBlockInChannel(ch exchange.Channel, blk blocks.Block) erro
 // from the user, not when receiving it from the network.
 // In case you run `git blame` on this comment, I'll save you some time: ask
 // @whyrusleeping, I don't know the answers you seek.
-func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []blocks.Block, haves []cid.Cid, dontHaves []cid.Cid) error {
+func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []bsmsg.MsgBlock, haves []wl.WantKey, dontHaves []wl.WantKey) error {
 	select {
 	case <-bs.process.Closing():
 		return errors.New("bitswap is closed")
 	default:
 	}
 
+	// do filter after receiving keys. do we have access to these keys?
+	haves = ac.FilterKeys(haves, bs.network.Self())
+	dontHaves = ac.FilterKeys(dontHaves, bs.network.Self())
+	newBlks := make([]bsmsg.MsgBlock, 0, len(blks))
+	for _, c := range blks {
+		ok, _ := ac.GlobalFilter(bs.network.Self(), c.GetChannel(), c.Cid())
+		if ok {
+			newBlks = append(newBlks, c)
+		}
+	}
+	blks = newBlks
+
 	wanted := blks
 
 	// If blocks came from the network
 	if from != "" {
-		var notWanted []blocks.Block
+		var notWanted []bsmsg.MsgBlock
 		wanted, notWanted = bs.sim.SplitWantedUnwanted(blks)
 		for _, b := range notWanted {
 			log.Debugf("[recv] block not in wantlist; cid=%s, peer=%s", b.Cid(), from)
@@ -423,7 +442,8 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 
 	// Put wanted blocks into blockstore
 	if len(wanted) > 0 {
-		err := bs.blockstore.PutMany(wanted)
+		rawBlks := bsmsg.MsgBlocksToBlocks(wanted)
+		err := bs.blockstore.PutMany(rawBlks)
 		if err != nil {
 			log.Errorf("Error writing %d blocks to datastore: %s", len(wanted), err)
 			return err
@@ -436,15 +456,15 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	// to the same node. We should address this soon, but i'm not going to do
 	// it now as it requires more thought and isnt causing immediate problems.
 
-	allKs := make([]cid.Cid, 0, len(blks))
+	allKs := make([]wl.WantKey, 0, len(blks))
 	for _, b := range blks {
-		allKs = append(allKs, b.Cid())
+		allKs = append(allKs, b.GetKey())
 	}
 
 	// If the message came from the network
 	if from != "" {
 		// Inform the PeerManager so that we can calculate per-peer latency
-		combined := make([]cid.Cid, 0, len(allKs)+len(haves)+len(dontHaves))
+		combined := make([]wl.WantKey, 0, len(allKs)+len(haves)+len(dontHaves))
 		combined = append(combined, allKs...)
 		combined = append(combined, haves...)
 		combined = append(combined, dontHaves...)
@@ -495,6 +515,7 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 
 	// This call records changes to wantlists, blocks received,
 	// and number of bytes transfered.
+	// do filter HookAfterReceiveWant inside
 	bs.engine.MessageReceived(ctx, p, incoming)
 	// TODO: this is bad, and could be easily abused.
 	// Should only track *useful* messages in ledger
@@ -524,7 +545,7 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	}
 }
 
-func (bs *Bitswap) updateReceiveCounters(blocks []blocks.Block) {
+func (bs *Bitswap) updateReceiveCounters(blocks []bsmsg.MsgBlock) {
 	// Check which blocks are in the datastore
 	// (Note: any errors from the blockstore are simply logged out in
 	// blockstoreHas())
@@ -554,7 +575,7 @@ func (bs *Bitswap) updateReceiveCounters(blocks []blocks.Block) {
 	}
 }
 
-func (bs *Bitswap) blockstoreHas(blks []blocks.Block) []bool {
+func (bs *Bitswap) blockstoreHas(blks []bsmsg.MsgBlock) []bool {
 	res := make([]bool, len(blks))
 
 	wg := sync.WaitGroup{}
@@ -613,7 +634,7 @@ func (bs *Bitswap) GetWantlist() []cid.Cid {
 // GetWantlistForChannel returns the current local wantlist for the specified
 // channel (both want-blocks and want-haves).
 func (bs *Bitswap) GetWantlistForChannel(ch exchange.Channel) []cid.Cid {
-	return bs.pm.CurrentWants()
+	return wl.KeysToCids(bs.pm.CurrentWants())
 }
 
 // GetWantBlocks returns the current list of want-blocks for the default public exchange channel.
@@ -623,7 +644,7 @@ func (bs *Bitswap) GetWantBlocks() []cid.Cid {
 
 // GetWantBlocksForChannel returns the current list of want-blocks for the specified channel.
 func (bs *Bitswap) GetWantBlocksForChannel(ch exchange.Channel) []cid.Cid {
-	return bs.pm.CurrentWantBlocks()
+	return wl.KeysToCids(bs.pm.CurrentWantBlocks())
 }
 
 // GetWantHaves returns the current list of want-haves for the default public exchange channel.
@@ -633,7 +654,7 @@ func (bs *Bitswap) GetWantHaves() []cid.Cid {
 
 // GetWantHavesForChannel returns the current list of want-haves for the specified channel.
 func (bs *Bitswap) GetWantHavesForChannel(ch exchange.Channel) []cid.Cid {
-	return bs.pm.CurrentWantHaves()
+	return wl.KeysToCids(bs.pm.CurrentWantHaves())
 }
 
 // IsOnline is needed to match go-ipfs-exchange-interface
@@ -651,12 +672,6 @@ func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, exchange.PublicChannel)
 }
 
-// NewSessionForChannel returns nil if self is not in this channel, so remember to check return value
 func (bs *Bitswap) NewSessionForChannel(ctx context.Context, ch exchange.Channel) exchange.Fetcher {
-	ok, _ := ac.GlobalFilter(bs.network.Self(), ch, cid.Undef)
-	if ok {
-		return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
-	} else {
-		return nil
-	}
+	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, ch)
 }

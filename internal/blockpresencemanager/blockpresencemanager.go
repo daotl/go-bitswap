@@ -3,26 +3,26 @@ package blockpresencemanager
 import (
 	"sync"
 
-	cid "github.com/ipfs/go-cid"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	bswl "github.com/daotl/go-bitswap/wantlist"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 // BlockPresenceManager keeps track of which peers have indicated that they
 // have or explicitly don't have a block
 type BlockPresenceManager struct {
 	sync.RWMutex
-	presence map[cid.Cid]map[peer.ID]bool
+	presence map[bswl.WantKey]map[peer.ID]bool
 }
 
 func New() *BlockPresenceManager {
 	return &BlockPresenceManager{
-		presence: make(map[cid.Cid]map[peer.ID]bool),
+		presence: make(map[bswl.WantKey]map[peer.ID]bool),
 	}
 }
 
 // ReceiveFrom is called when a peer sends us information about which blocks
 // it has and does not have
-func (bpm *BlockPresenceManager) ReceiveFrom(p peer.ID, haves []cid.Cid, dontHaves []cid.Cid) {
+func (bpm *BlockPresenceManager) ReceiveFrom(p peer.ID, haves []bswl.WantKey, dontHaves []bswl.WantKey) {
 	bpm.Lock()
 	defer bpm.Unlock()
 
@@ -34,7 +34,7 @@ func (bpm *BlockPresenceManager) ReceiveFrom(p peer.ID, haves []cid.Cid, dontHav
 	}
 }
 
-func (bpm *BlockPresenceManager) updateBlockPresence(p peer.ID, c cid.Cid, present bool) {
+func (bpm *BlockPresenceManager) updateBlockPresence(p peer.ID, c bswl.WantKey, present bool) {
 	_, ok := bpm.presence[c]
 	if !ok {
 		bpm.presence[c] = make(map[peer.ID]bool)
@@ -50,7 +50,7 @@ func (bpm *BlockPresenceManager) updateBlockPresence(p peer.ID, c cid.Cid, prese
 
 // PeerHasBlock indicates whether the given peer has sent a HAVE for the given
 // cid
-func (bpm *BlockPresenceManager) PeerHasBlock(p peer.ID, c cid.Cid) bool {
+func (bpm *BlockPresenceManager) PeerHasBlock(p peer.ID, c bswl.WantKey) bool {
 	bpm.RLock()
 	defer bpm.RUnlock()
 
@@ -59,7 +59,7 @@ func (bpm *BlockPresenceManager) PeerHasBlock(p peer.ID, c cid.Cid) bool {
 
 // PeerDoesNotHaveBlock indicates whether the given peer has sent a DONT_HAVE
 // for the given cid
-func (bpm *BlockPresenceManager) PeerDoesNotHaveBlock(p peer.ID, c cid.Cid) bool {
+func (bpm *BlockPresenceManager) PeerDoesNotHaveBlock(p peer.ID, c bswl.WantKey) bool {
 	bpm.RLock()
 	defer bpm.RUnlock()
 
@@ -71,11 +71,11 @@ func (bpm *BlockPresenceManager) PeerDoesNotHaveBlock(p peer.ID, c cid.Cid) bool
 // for a key.
 // This allows us to know if we've exhausted all possibilities of finding
 // the key with the peers we know about.
-func (bpm *BlockPresenceManager) AllPeersDoNotHaveBlock(peers []peer.ID, ks []cid.Cid) []cid.Cid {
+func (bpm *BlockPresenceManager) AllPeersDoNotHaveBlock(peers []peer.ID, ks []bswl.WantKey) []bswl.WantKey {
 	bpm.RLock()
 	defer bpm.RUnlock()
 
-	var res []cid.Cid
+	var res []bswl.WantKey
 	for _, c := range ks {
 		if bpm.allDontHave(peers, c) {
 			res = append(res, c)
@@ -84,7 +84,7 @@ func (bpm *BlockPresenceManager) AllPeersDoNotHaveBlock(peers []peer.ID, ks []ci
 	return res
 }
 
-func (bpm *BlockPresenceManager) allDontHave(peers []peer.ID, c cid.Cid) bool {
+func (bpm *BlockPresenceManager) allDontHave(peers []peer.ID, c bswl.WantKey) bool {
 	// Check if we know anything about the cid's block presence
 	ps, cok := bpm.presence[c]
 	if !cok {
@@ -101,7 +101,7 @@ func (bpm *BlockPresenceManager) allDontHave(peers []peer.ID, c cid.Cid) bool {
 }
 
 // RemoveKeys cleans up the given keys from the block presence map
-func (bpm *BlockPresenceManager) RemoveKeys(ks []cid.Cid) {
+func (bpm *BlockPresenceManager) RemoveKeys(ks []bswl.WantKey) {
 	bpm.Lock()
 	defer bpm.Unlock()
 
@@ -112,7 +112,7 @@ func (bpm *BlockPresenceManager) RemoveKeys(ks []cid.Cid) {
 
 // HasKey indicates whether the BlockPresenceManager is tracking the given key
 // (used by the tests)
-func (bpm *BlockPresenceManager) HasKey(c cid.Cid) bool {
+func (bpm *BlockPresenceManager) HasKey(c bswl.WantKey) bool {
 	bpm.Lock()
 	defer bpm.Unlock()
 

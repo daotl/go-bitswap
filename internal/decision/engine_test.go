@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	wl "github.com/daotl/go-bitswap/wantlist"
 	ds "github.com/daotl/go-datastore"
 	"github.com/daotl/go-datastore/key"
 	dssync "github.com/daotl/go-datastore/sync"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
-	"github.com/ipfs/go-cid"
 	process "github.com/jbenet/goprocess"
 	"github.com/libp2p/go-libp2p-core/peer"
 	libp2ptest "github.com/libp2p/go-libp2p-core/test"
@@ -124,7 +124,7 @@ func TestConsistentAccounting(t *testing.T) {
 
 		m := message.New(false)
 		content := []string{"this", "is", "message", "i"}
-		m.AddBlock(blocks.NewBlock([]byte(strings.Join(content, " "))))
+		m.AddBlock(message.NewMsgBlock(blocks.NewBlock([]byte(strings.Join(content, " "))), ""))
 
 		sender.Engine.MessageSent(receiver.Peer, m)
 		receiver.Engine.MessageReceived(ctx, sender.Peer, m)
@@ -793,7 +793,7 @@ func checkPresence(presences []message.BlockPresence, expPresence []string, pres
 	return nil
 }
 
-func formatBlocksDiff(blks []blocks.Block, expBlks []string) string {
+func formatBlocksDiff(blks []message.MsgBlock, expBlks []string) string {
 	var out bytes.Buffer
 	out.WriteString(fmt.Sprintf("Blocks (%d):\n", len(blks)))
 	for _, b := range blks {
@@ -906,12 +906,12 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 	e := newEngine(bs, 4, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := testutil.GenerateMsgBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, false)
+	msg.AddEntry(blks[0].GetKey(), 4, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[1].GetKey(), 3, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[2].GetKey(), 2, pb.Message_Wantlist_Block, false)
+	msg.AddEntry(blks[3].GetKey(), 1, pb.Message_Wantlist_Block, false)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	// Nothing in blockstore, so shouldn't get any envelope
@@ -924,7 +924,7 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 	if err := bs.PutMany([]blocks.Block{blks[0], blks[2]}); err != nil {
 		t.Fatal(err)
 	}
-	e.ReceiveFrom(otherPeer, []blocks.Block{blks[0], blks[2]}, []cid.Cid{})
+	e.ReceiveFrom(otherPeer, []message.MsgBlock{blks[0], blks[2]}, nil)
 	_, env = getNextEnvelope(e, next, 5*time.Millisecond)
 	if env == nil {
 		t.Fatal("expected envelope")
@@ -954,12 +954,12 @@ func TestSendDontHave(t *testing.T) {
 	e := newEngine(bs, 4, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := testutil.GenerateMsgBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, true)
+	msg.AddEntry(blks[0].GetKey(), 4, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[1].GetKey(), 3, pb.Message_Wantlist_Have, true)
+	msg.AddEntry(blks[2].GetKey(), 2, pb.Message_Wantlist_Block, false)
+	msg.AddEntry(blks[3].GetKey(), 1, pb.Message_Wantlist_Block, true)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	// Nothing in blockstore, should get DONT_HAVE for entries that wanted it
@@ -988,10 +988,10 @@ func TestSendDontHave(t *testing.T) {
 	}
 
 	// Receive all the blocks
-	if err := bs.PutMany(blks); err != nil {
+	if err := bs.PutMany(message.MsgBlocksToBlocks(blks)); err != nil {
 		t.Fatal(err)
 	}
-	e.ReceiveFrom(otherPeer, blks, []cid.Cid{})
+	e.ReceiveFrom(otherPeer, blks, nil)
 
 	// Envelope should contain 2 HAVEs / 2 blocks
 	_, env = getNextEnvelope(e, next, 10*time.Millisecond)
@@ -1022,15 +1022,15 @@ func TestWantlistForPeer(t *testing.T) {
 	e := newEngine(bs, 4, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := testutil.GenerateMsgBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[0].GetKey(), 2, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[1].GetKey(), 3, pb.Message_Wantlist_Have, false)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	msg2 := message.New(false)
-	msg2.AddEntry(blks[2].Cid(), 1, pb.Message_Wantlist_Block, false)
-	msg2.AddEntry(blks[3].Cid(), 4, pb.Message_Wantlist_Block, false)
+	msg2.AddEntry(blks[2].GetKey(), 1, pb.Message_Wantlist_Block, false)
+	msg2.AddEntry(blks[3].GetKey(), 4, pb.Message_Wantlist_Block, false)
 	e.MessageReceived(context.Background(), partner, msg2)
 
 	entries := e.WantlistForPeer(otherPeer)
@@ -1086,7 +1086,7 @@ func TestTaggingUseful(t *testing.T) {
 	me := newTestEngineWithSampling(ctx, "engine", peerSampleInterval, sampleCh)
 	friend := peer.ID("friend")
 
-	block := blocks.NewBlock([]byte("foobar"))
+	block := message.NewMsgBlock(blocks.NewBlock([]byte("foobar")), "")
 	msg := message.New(false)
 	msg.AddBlock(block)
 
@@ -1134,8 +1134,8 @@ func TestTaggingUseful(t *testing.T) {
 func partnerWantBlocks(e *Engine, keys []string, partner peer.ID) {
 	add := message.New(false)
 	for i, letter := range keys {
-		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), int32(len(keys)-i), pb.Message_Wantlist_Block, true)
+		block := message.NewMsgBlock(blocks.NewBlock([]byte(letter)), "")
+		add.AddEntry(block.GetKey(), int32(len(keys)-i), pb.Message_Wantlist_Block, true)
 	}
 	e.MessageReceived(context.Background(), partner, add)
 }
@@ -1144,13 +1144,13 @@ func partnerWantBlocksHaves(e *Engine, keys []string, wantHaves []string, sendDo
 	add := message.New(false)
 	priority := int32(len(wantHaves) + len(keys))
 	for _, letter := range wantHaves {
-		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Have, sendDontHave)
+		block := message.NewMsgBlock(blocks.NewBlock([]byte(letter)), "")
+		add.AddEntry(block.GetKey(), priority, pb.Message_Wantlist_Have, sendDontHave)
 		priority--
 	}
 	for _, letter := range keys {
-		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Block, sendDontHave)
+		block := message.NewMsgBlock(blocks.NewBlock([]byte(letter)), "")
+		add.AddEntry(block.GetKey(), priority, pb.Message_Wantlist_Block, sendDontHave)
 		priority--
 	}
 	e.MessageReceived(context.Background(), partner, add)
@@ -1160,7 +1160,7 @@ func partnerCancels(e *Engine, keys []string, partner peer.ID) {
 	cancels := message.New(false)
 	for _, k := range keys {
 		block := blocks.NewBlock([]byte(k))
-		cancels.Cancel(block.Cid())
+		cancels.Cancel(wl.NewWantKey(block.Cid(), ""))
 	}
 	e.MessageReceived(context.Background(), partner, cancels)
 }

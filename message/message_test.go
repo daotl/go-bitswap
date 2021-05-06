@@ -18,7 +18,7 @@ func mkFakeKey(s string) wantlist.WantKey {
 }
 
 func mkFakeMsgBlock(bs []byte) MsgBlock {
-	return newMsgBlock(blocks.NewBlock(bs), "")
+	return NewMsgBlock(blocks.NewBlock(bs), "")
 }
 
 func TestAppendWanted(t *testing.T) {
@@ -59,7 +59,7 @@ func TestAppendBlock(t *testing.T) {
 	m := New(true)
 	for _, str := range strs {
 		block := blocks.NewBlock([]byte(str))
-		m.AddBlock(newMsgBlock(block, ""))
+		m.AddBlock(NewMsgBlock(block, ""))
 	}
 
 	// assert strings are in proto message

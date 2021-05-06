@@ -3,21 +3,20 @@ package sessioninterestmanager
 import (
 	"testing"
 
-	"github.com/ipfs/go-cid"
-
 	"github.com/daotl/go-bitswap/internal/testutil"
+	"github.com/daotl/go-bitswap/wantlist"
 )
 
 func TestEmpty(t *testing.T) {
 	sim := New()
 
 	ses := uint64(1)
-	cids := testutil.GenerateCids(2)
+	cids := testutil.GenerateWantKeys(2)
 	res := sim.FilterSessionInterested(ses, cids)
 	if len(res) != 1 || len(res[0]) > 0 {
 		t.Fatal("Expected no interest")
 	}
-	if len(sim.InterestedSessions(cids, []cid.Cid{}, []cid.Cid{})) > 0 {
+	if len(sim.InterestedSessions(cids, []wantlist.WantKey{}, []wantlist.WantKey{})) > 0 {
 		t.Fatal("Expected no interest")
 	}
 }
@@ -27,15 +26,15 @@ func TestBasic(t *testing.T) {
 
 	ses1 := uint64(1)
 	ses2 := uint64(2)
-	cids1 := testutil.GenerateCids(2)
-	cids2 := append(testutil.GenerateCids(1), cids1[1])
+	cids1 := testutil.GenerateWantKeys(2)
+	cids2 := append(testutil.GenerateWantKeys(1), cids1[1])
 	sim.RecordSessionInterest(ses1, cids1)
 
 	res := sim.FilterSessionInterested(ses1, cids1)
 	if len(res) != 1 || len(res[0]) != 2 {
 		t.Fatal("Expected 2 keys")
 	}
-	if len(sim.InterestedSessions(cids1, []cid.Cid{}, []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions(cids1, []wantlist.WantKey{}, []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
 
@@ -49,10 +48,10 @@ func TestBasic(t *testing.T) {
 		t.Fatal("Expected 2 keys")
 	}
 
-	if len(sim.InterestedSessions(cids1[:1], []cid.Cid{}, []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions(cids1[:1], []wantlist.WantKey{}, []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions(cids1[1:], []cid.Cid{}, []cid.Cid{})) != 2 {
+	if len(sim.InterestedSessions(cids1[1:], []wantlist.WantKey{}, []wantlist.WantKey{})) != 2 {
 		t.Fatal("Expected 2 sessions")
 	}
 }
@@ -61,25 +60,25 @@ func TestInterestedSessions(t *testing.T) {
 	sim := New()
 
 	ses := uint64(1)
-	cids := testutil.GenerateCids(3)
+	cids := testutil.GenerateWantKeys(3)
 	sim.RecordSessionInterest(ses, cids[0:2])
 
-	if len(sim.InterestedSessions(cids, []cid.Cid{}, []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions(cids, []wantlist.WantKey{}, []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions(cids[0:1], []cid.Cid{}, []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions(cids[0:1], []wantlist.WantKey{}, []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions([]cid.Cid{}, cids, []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions([]wantlist.WantKey{}, cids, []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions([]cid.Cid{}, cids[0:1], []cid.Cid{})) != 1 {
+	if len(sim.InterestedSessions([]wantlist.WantKey{}, cids[0:1], []wantlist.WantKey{})) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions([]cid.Cid{}, []cid.Cid{}, cids)) != 1 {
+	if len(sim.InterestedSessions([]wantlist.WantKey{}, []wantlist.WantKey{}, cids)) != 1 {
 		t.Fatal("Expected 1 session")
 	}
-	if len(sim.InterestedSessions([]cid.Cid{}, []cid.Cid{}, cids[0:1])) != 1 {
+	if len(sim.InterestedSessions([]wantlist.WantKey{}, []wantlist.WantKey{}, cids[0:1])) != 1 {
 		t.Fatal("Expected 1 session")
 	}
 }
@@ -89,8 +88,8 @@ func TestRemoveSession(t *testing.T) {
 
 	ses1 := uint64(1)
 	ses2 := uint64(2)
-	cids1 := testutil.GenerateCids(2)
-	cids2 := append(testutil.GenerateCids(1), cids1[1])
+	cids1 := testutil.GenerateWantKeys(2)
+	cids2 := append(testutil.GenerateWantKeys(1), cids1[1])
 	sim.RecordSessionInterest(ses1, cids1)
 	sim.RecordSessionInterest(ses2, cids2)
 	sim.RemoveSession(ses1)
@@ -117,12 +116,12 @@ func TestRemoveSessionInterested(t *testing.T) {
 
 	ses1 := uint64(1)
 	ses2 := uint64(2)
-	cids1 := testutil.GenerateCids(2)
-	cids2 := append(testutil.GenerateCids(1), cids1[1])
+	cids1 := testutil.GenerateWantKeys(2)
+	cids2 := append(testutil.GenerateWantKeys(1), cids1[1])
 	sim.RecordSessionInterest(ses1, cids1)
 	sim.RecordSessionInterest(ses2, cids2)
 
-	res := sim.RemoveSessionInterested(ses1, []cid.Cid{cids1[0]})
+	res := sim.RemoveSessionInterested(ses1, []wantlist.WantKey{cids1[0]})
 	if len(res) != 1 {
 		t.Fatal("Expected no interested sessions left")
 	}
@@ -149,14 +148,14 @@ func TestRemoveSessionInterested(t *testing.T) {
 }
 
 func TestSplitWantedUnwanted(t *testing.T) {
-	blks := testutil.GenerateBlocksOfSize(3, 1024)
+	blks := testutil.GenerateMsgBlocksOfSize(3, 1024)
 	sim := New()
 	ses1 := uint64(1)
 	ses2 := uint64(2)
 
-	var cids []cid.Cid
+	var cids []wantlist.WantKey
 	for _, b := range blks {
-		cids = append(cids, b.Cid())
+		cids = append(cids, b.GetKey())
 	}
 
 	// ses1: <none>

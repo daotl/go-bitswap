@@ -233,7 +233,7 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 			return nil, err
 		}
 
-		m.AddBlock(newMsgBlock(blk, exchange.Channel(b.Channel)))
+		m.AddBlock(NewMsgBlock(blk, exchange.Channel(b.Channel)))
 	}
 
 	for _, bi := range pbm.GetBlockPresences() {
@@ -353,29 +353,6 @@ func (m *impl) addEntry(c wantlist.WantKey, priority int32, cancel bool, wantTyp
 	m.wantlist[c] = e
 
 	return e.Size()
-}
-
-type MsgBlock interface {
-	blocks.Block
-	GetChannel() exchange.Channel
-	GetKey() wantlist.WantKey
-}
-
-type msgBlock struct {
-	blocks.Block
-	ch exchange.Channel
-}
-
-func newMsgBlock(block blocks.Block, ch exchange.Channel) *msgBlock {
-	return &msgBlock{Block: block, ch: ch}
-}
-
-func (m *msgBlock) GetChannel() exchange.Channel {
-	return m.ch
-}
-
-func (m *msgBlock) GetKey() wantlist.WantKey {
-	return wantlist.NewWantKey(m.Cid(), m.ch)
 }
 
 func (m *impl) AddBlock(b MsgBlock) {

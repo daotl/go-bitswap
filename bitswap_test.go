@@ -3,26 +3,29 @@ package bitswap_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	mockrouting "github.com/daotl/go-ipfs-routing/mock"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	detectrace "github.com/ipfs/go-detect-race"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	delay "github.com/ipfs/go-ipfs-delay"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peer"
 	p2ptestutil "github.com/libp2p/go-libp2p-netutil"
-	travis "github.com/libp2p/go-libp2p-testing/ci/travis"
+	"github.com/libp2p/go-libp2p-testing/ci/travis"
 	tu "github.com/libp2p/go-libp2p-testing/etc"
 
-	bitswap "github.com/daotl/go-bitswap"
+	"github.com/daotl/go-bitswap"
 	deciface "github.com/daotl/go-bitswap/decision"
-	decision "github.com/daotl/go-bitswap/internal/decision"
+	"github.com/daotl/go-bitswap/internal/decision"
 	bssession "github.com/daotl/go-bitswap/internal/session"
 	"github.com/daotl/go-bitswap/message"
 	bsmsg "github.com/daotl/go-bitswap/message"
@@ -30,6 +33,8 @@ import (
 	testinstance "github.com/daotl/go-bitswap/testinstance"
 	tn "github.com/daotl/go-bitswap/testnet"
 )
+
+var ErrBlocked = errors.New("blocked")
 
 // FIXME the tests are really sensitive to the network delay. fix them to work
 // well under varying conditions
@@ -112,6 +117,52 @@ func TestGetBlockFromPeerAfterPeerAnnounces(t *testing.T) {
 	}
 }
 
+func TestGetBlockDontPassFilter(t *testing.T) {
+
+	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(kNetworkDelay))
+	block := blocks.NewBlock([]byte("block"))
+	ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+	defer ig.Close()
+
+	peers := ig.Instances(2)
+	hasBlock := peers[0]
+	defer hasBlock.Exchange.Close()
+
+	if err := hasBlock.Exchange.HasBlock(block); err != nil {
+		t.Fatal(err)
+	}
+	ac.GlobalFilter = func(pid peer.ID, channel exchange.Channel, id cid.Cid) (bool, error) {
+		if id == block.Cid() {
+			return false, ErrBlocked
+		} else {
+			return true, nil
+		}
+	}
+	defer ac.ResetFilter()
+	wantsBlock := peers[1]
+	defer wantsBlock.Exchange.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := wantsBlock.Exchange.GetBlock(ctx, block.Cid())
+	if err == nil {
+		t.Fatal("Expected to fail")
+	}
+
+	recv, err := wantsBlock.Exchange.GetBlocks(ctx, []cid.Cid{block.Cid()})
+	if err == nil {
+		t.Fatal("Expected to fail")
+	}
+	select {
+	case _, ok := <-recv:
+		if ok {
+			t.Fatal("Expected to be closed")
+		}
+	default:
+		t.Fatal("Expected to be closed")
+	}
+}
+
 func TestDoesNotProvideWhenConfiguredNotTo(t *testing.T) {
 	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(kNetworkDelay))
 	block := blocks.NewBlock([]byte("block"))
@@ -149,7 +200,7 @@ func TestDoesNotProvideWhenConfiguredNotTo(t *testing.T) {
 func TestUnwantedBlockNotAdded(t *testing.T) {
 
 	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(kNetworkDelay))
-	block := blocks.NewBlock([]byte("block"))
+	block := message.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 	bsMessage := message.New(true)
 	bsMessage.AddBlock(block)
 
@@ -217,7 +268,7 @@ func TestPendingBlockAdded(t *testing.T) {
 	// Simulate receiving a message which contains the block in the "tofetch" queue
 	lastBlock := blks[len(blks)-1]
 	bsMessage := message.New(true)
-	bsMessage.AddBlock(lastBlock)
+	bsMessage.AddBlock(message.NewMsgBlock(lastBlock, ""))
 	unknownPeer := peer.ID("QmUHfvCQrzyR6vFXmeyCptfCWedfcmfa12V6UuziDtrw23")
 	instance.Exchange.ReceiveMessage(oneSecCtx, unknownPeer, bsMessage)
 

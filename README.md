@@ -161,6 +161,11 @@ Then Bitswap will call configured `ACFilter` at the following lifecycle points:
 to determine if the requesting peer has the permission to access the specified
 block in the specified exchange channel.
 
+- afterIssueRequest: session.GetBlock(s)FromChannel
+- beforeSendWant: messageQueue.AddBroadcast, sessionWantSender.sendWants
+- afterReceiveWant/block: bitswap.receiveBlocksFrom
+- beforeSendResponse: not necessary? we have filtered out illegal inbound wants
+
 ## Contribute
 
 PRs are welcome!

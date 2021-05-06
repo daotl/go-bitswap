@@ -3,21 +3,22 @@ package sessioninterestmanager
 import (
 	"sync"
 
-	blocks "github.com/ipfs/go-block-format"
-
-	cid "github.com/ipfs/go-cid"
+	bsmsg "github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
 )
 
-// SessionInterestManager records the CIDs that each session is interested in.
+// refactor: from cid.Cid to wl.WantKey
+
+// SessionInterestManager records the keys that each session is interested in.
 type SessionInterestManager struct {
 	lk    sync.RWMutex
-	wants map[cid.Cid]map[uint64]bool
+	wants map[wl.WantKey]map[uint64]bool
 }
 
 // New initializes a new SessionInterestManager.
 func New() *SessionInterestManager {
 	return &SessionInterestManager{
-		// Map of cids -> sessions -> bool
+		// Map of wantkeys -> sessions -> bool
 		//
 		// The boolean indicates whether the session still wants the block
 		// or is just interested in receiving messages about it.
@@ -25,13 +26,13 @@ func New() *SessionInterestManager {
 		// Note that once the block is received the session no longer wants
 		// the block, but still wants to receive messages from peers who have
 		// the block as they may have other blocks the session is interested in.
-		wants: make(map[cid.Cid]map[uint64]bool),
+		wants: make(map[wl.WantKey]map[uint64]bool),
 	}
 }
 
 // When the client asks the session for blocks, the session calls
 // RecordSessionInterest() with those cids.
-func (sim *SessionInterestManager) RecordSessionInterest(ses uint64, ks []cid.Cid) {
+func (sim *SessionInterestManager) RecordSessionInterest(ses uint64, ks []wl.WantKey) {
 	sim.lk.Lock()
 	defer sim.lk.Unlock()
 
@@ -48,12 +49,12 @@ func (sim *SessionInterestManager) RecordSessionInterest(ses uint64, ks []cid.Ci
 
 // When the session shuts down it calls RemoveSessionInterest().
 // Returns the keys that no session is interested in any more.
-func (sim *SessionInterestManager) RemoveSession(ses uint64) []cid.Cid {
+func (sim *SessionInterestManager) RemoveSession(ses uint64) []wl.WantKey {
 	sim.lk.Lock()
 	defer sim.lk.Unlock()
 
 	// The keys that no session is interested in
-	deletedKs := make([]cid.Cid, 0)
+	deletedKs := make([]wl.WantKey, 0)
 
 	// For each known key
 	for c := range sim.wants {
@@ -73,7 +74,7 @@ func (sim *SessionInterestManager) RemoveSession(ses uint64) []cid.Cid {
 }
 
 // When the session receives blocks, it calls RemoveSessionWants().
-func (sim *SessionInterestManager) RemoveSessionWants(ses uint64, ks []cid.Cid) {
+func (sim *SessionInterestManager) RemoveSessionWants(ses uint64, ks []wl.WantKey) {
 	sim.lk.Lock()
 	defer sim.lk.Unlock()
 
@@ -89,12 +90,12 @@ func (sim *SessionInterestManager) RemoveSessionWants(ses uint64, ks []cid.Cid) 
 
 // When a request is cancelled, the session calls RemoveSessionInterested().
 // Returns the keys that no session is interested in any more.
-func (sim *SessionInterestManager) RemoveSessionInterested(ses uint64, ks []cid.Cid) []cid.Cid {
+func (sim *SessionInterestManager) RemoveSessionInterested(ses uint64, ks []wl.WantKey) []wl.WantKey {
 	sim.lk.Lock()
 	defer sim.lk.Unlock()
 
 	// The keys that no session is interested in
-	deletedKs := make([]cid.Cid, 0, len(ks))
+	deletedKs := make([]wl.WantKey, 0, len(ks))
 
 	// For each key
 	for _, c := range ks {
@@ -118,15 +119,15 @@ func (sim *SessionInterestManager) RemoveSessionInterested(ses uint64, ks []cid.
 
 // The session calls FilterSessionInterested() to filter the sets of keys for
 // those that the session is interested in
-func (sim *SessionInterestManager) FilterSessionInterested(ses uint64, ksets ...[]cid.Cid) [][]cid.Cid {
+func (sim *SessionInterestManager) FilterSessionInterested(ses uint64, ksets ...[]wl.WantKey) [][]wl.WantKey {
 	sim.lk.RLock()
 	defer sim.lk.RUnlock()
 
 	// For each set of keys
-	kres := make([][]cid.Cid, len(ksets))
+	kres := make([][]wl.WantKey, len(ksets))
 	for i, ks := range ksets {
 		// The set of keys that at least one session is interested in
-		has := make([]cid.Cid, 0, len(ks))
+		has := make([]wl.WantKey, 0, len(ks))
 
 		// For each key in the list
 		for _, c := range ks {
@@ -142,14 +143,14 @@ func (sim *SessionInterestManager) FilterSessionInterested(ses uint64, ksets ...
 
 // When bitswap receives blocks it calls SplitWantedUnwanted() to discard
 // unwanted blocks
-func (sim *SessionInterestManager) SplitWantedUnwanted(blks []blocks.Block) ([]blocks.Block, []blocks.Block) {
+func (sim *SessionInterestManager) SplitWantedUnwanted(blks []bsmsg.MsgBlock) ([]bsmsg.MsgBlock, []bsmsg.MsgBlock) {
 	sim.lk.RLock()
 	defer sim.lk.RUnlock()
 
 	// Get the wanted block keys as a set
-	wantedKs := cid.NewSet()
+	wantedKs := wl.NewSet()
 	for _, b := range blks {
-		c := b.Cid()
+		c := b.GetKey()
 		// For each session that is interested in the key
 		for ses := range sim.wants[c] {
 			// If the session wants the key (rather than just being interested)
@@ -161,10 +162,10 @@ func (sim *SessionInterestManager) SplitWantedUnwanted(blks []blocks.Block) ([]b
 	}
 
 	// Separate the blocks into wanted and unwanted
-	wantedBlks := make([]blocks.Block, 0, len(blks))
-	notWantedBlks := make([]blocks.Block, 0)
+	wantedBlks := make([]bsmsg.MsgBlock, 0, len(blks))
+	notWantedBlks := make([]bsmsg.MsgBlock, 0)
 	for _, b := range blks {
-		if wantedKs.Has(b.Cid()) {
+		if wantedKs.Has(b.GetKey()) {
 			wantedBlks = append(wantedBlks, b)
 		} else {
 			notWantedBlks = append(notWantedBlks, b)
@@ -175,11 +176,11 @@ func (sim *SessionInterestManager) SplitWantedUnwanted(blks []blocks.Block) ([]b
 
 // When the SessionManager receives a message it calls InterestedSessions() to
 // find out which sessions are interested in the message.
-func (sim *SessionInterestManager) InterestedSessions(blks []cid.Cid, haves []cid.Cid, dontHaves []cid.Cid) []uint64 {
+func (sim *SessionInterestManager) InterestedSessions(blks []wl.WantKey, haves []wl.WantKey, dontHaves []wl.WantKey) []uint64 {
 	sim.lk.RLock()
 	defer sim.lk.RUnlock()
 
-	ks := make([]cid.Cid, 0, len(blks)+len(haves)+len(dontHaves))
+	ks := make([]wl.WantKey, 0, len(blks)+len(haves)+len(dontHaves))
 	ks = append(ks, blks...)
 	ks = append(ks, haves...)
 	ks = append(ks, dontHaves...)

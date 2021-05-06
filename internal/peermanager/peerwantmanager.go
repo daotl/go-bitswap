@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	cid "github.com/ipfs/go-cid"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	bswl "github.com/daotl/go-bitswap/wantlist"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 // Gauge can be used to keep track of a metric that increases and decreases
@@ -25,10 +25,10 @@ type peerWantManager struct {
 	peerWants map[peer.ID]*peerWant
 
 	// Reverse index of all wants in peerWants.
-	wantPeers map[cid.Cid]map[peer.ID]struct{}
+	wantPeers map[bswl.WantKey]map[peer.ID]struct{}
 
 	// broadcastWants tracks all the current broadcast wants.
-	broadcastWants *cid.Set
+	broadcastWants *bswl.Set
 
 	// Keeps track of the number of active want-haves & want-blocks
 	wantGauge Gauge
@@ -37,8 +37,8 @@ type peerWantManager struct {
 }
 
 type peerWant struct {
-	wantBlocks *cid.Set
-	wantHaves  *cid.Set
+	wantBlocks *bswl.Set
+	wantHaves  *bswl.Set
 	peerQueue  PeerQueue
 }
 
@@ -46,9 +46,9 @@ type peerWant struct {
 // number of active want-blocks (ie sent but no response received)
 func newPeerWantManager(wantGauge Gauge, wantBlockGauge Gauge) *peerWantManager {
 	return &peerWantManager{
-		broadcastWants: cid.NewSet(),
+		broadcastWants: bswl.NewSet(),
 		peerWants:      make(map[peer.ID]*peerWant),
-		wantPeers:      make(map[cid.Cid]map[peer.ID]struct{}),
+		wantPeers:      make(map[bswl.WantKey]map[peer.ID]struct{}),
 		wantGauge:      wantGauge,
 		wantBlockGauge: wantBlockGauge,
 	}
@@ -62,14 +62,15 @@ func (pwm *peerWantManager) addPeer(peerQueue PeerQueue, p peer.ID) {
 	}
 
 	pwm.peerWants[p] = &peerWant{
-		wantBlocks: cid.NewSet(),
-		wantHaves:  cid.NewSet(),
+		wantBlocks: bswl.NewSet(),
+		wantHaves:  bswl.NewSet(),
 		peerQueue:  peerQueue,
 	}
 
 	// Broadcast any live want-haves to the newly connected peer
 	if pwm.broadcastWants.Len() > 0 {
 		wants := pwm.broadcastWants.Keys()
+		// TODO: filter
 		peerQueue.AddBroadcastWantHaves(wants)
 	}
 }
@@ -82,7 +83,7 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 	}
 
 	// Clean up want-blocks
-	_ = pws.wantBlocks.ForEach(func(c cid.Cid) error {
+	_ = pws.wantBlocks.ForEach(func(c bswl.WantKey) error {
 		// Clean up want-blocks from the reverse index
 		pwm.reverseIndexRemove(c, p)
 
@@ -99,7 +100,7 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 	})
 
 	// Clean up want-haves
-	_ = pws.wantHaves.ForEach(func(c cid.Cid) error {
+	_ = pws.wantHaves.ForEach(func(c bswl.WantKey) error {
 		// Clean up want-haves from the reverse index
 		pwm.reverseIndexRemove(c, p)
 
@@ -115,8 +116,8 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 }
 
 // broadcastWantHaves sends want-haves to any peers that have not yet been sent them.
-func (pwm *peerWantManager) broadcastWantHaves(wantHaves []cid.Cid) {
-	unsent := make([]cid.Cid, 0, len(wantHaves))
+func (pwm *peerWantManager) broadcastWantHaves(wantHaves []bswl.WantKey) {
+	unsent := make([]bswl.WantKey, 0, len(wantHaves))
 	for _, c := range wantHaves {
 		if pwm.broadcastWants.Has(c) {
 			// Already a broadcast want, skip it.
@@ -137,7 +138,7 @@ func (pwm *peerWantManager) broadcastWantHaves(wantHaves []cid.Cid) {
 	}
 
 	// Allocate a single buffer to filter broadcast wants for each peer
-	bcstWantsBuffer := make([]cid.Cid, 0, len(unsent))
+	bcstWantsBuffer := make([]bswl.WantKey, 0, len(unsent))
 
 	// Send broadcast wants to each peer
 	for _, pws := range pwm.peerWants {
@@ -157,9 +158,9 @@ func (pwm *peerWantManager) broadcastWantHaves(wantHaves []cid.Cid) {
 
 // sendWants only sends the peer the want-blocks and want-haves that have not
 // already been sent to it.
-func (pwm *peerWantManager) sendWants(p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid) {
-	fltWantBlks := make([]cid.Cid, 0, len(wantBlocks))
-	fltWantHvs := make([]cid.Cid, 0, len(wantHaves))
+func (pwm *peerWantManager) sendWants(p peer.ID, wantBlocks []bswl.WantKey, wantHaves []bswl.WantKey) {
+	fltWantBlks := make([]bswl.WantKey, 0, len(wantBlocks))
+	fltWantHvs := make([]bswl.WantKey, 0, len(wantHaves))
 
 	// Get the existing want-blocks and want-haves for the peer
 	pws, ok := pwm.peerWants[p]
@@ -231,14 +232,14 @@ func (pwm *peerWantManager) sendWants(p peer.ID, wantBlocks []cid.Cid, wantHaves
 
 // sendCancels sends a cancel to each peer to which a corresponding want was
 // sent
-func (pwm *peerWantManager) sendCancels(cancelKs []cid.Cid) {
+func (pwm *peerWantManager) sendCancels(cancelKs []bswl.WantKey) {
 	if len(cancelKs) == 0 {
 		return
 	}
 
 	// Record how many peers have a pending want-block and want-have for each
 	// key to be cancelled
-	peerCounts := make(map[cid.Cid]wantPeerCnts, len(cancelKs))
+	peerCounts := make(map[bswl.WantKey]wantPeerCnts, len(cancelKs))
 	for _, c := range cancelKs {
 		peerCounts[c] = pwm.wantPeerCounts(c)
 	}
@@ -246,7 +247,7 @@ func (pwm *peerWantManager) sendCancels(cancelKs []cid.Cid) {
 	// Create a buffer to use for filtering cancels per peer, with the
 	// broadcast wants at the front of the buffer (broadcast wants are sent to
 	// all peers)
-	broadcastCancels := make([]cid.Cid, 0, len(cancelKs))
+	broadcastCancels := make([]bswl.WantKey, 0, len(cancelKs))
 	for _, c := range cancelKs {
 		if pwm.broadcastWants.Has(c) {
 			broadcastCancels = append(broadcastCancels, c)
@@ -354,7 +355,7 @@ func (pwm *wantPeerCnts) wanted() bool {
 
 // wantPeerCounts counts how many peers have a pending want-block and want-have
 // for the given CID
-func (pwm *peerWantManager) wantPeerCounts(c cid.Cid) wantPeerCnts {
+func (pwm *peerWantManager) wantPeerCounts(c bswl.WantKey) wantPeerCnts {
 	blockCount := 0
 	haveCount := 0
 	for p := range pwm.wantPeers[c] {
@@ -375,7 +376,7 @@ func (pwm *peerWantManager) wantPeerCounts(c cid.Cid) wantPeerCnts {
 }
 
 // Add the peer to the list of peers that have sent a want with the cid
-func (pwm *peerWantManager) reverseIndexAdd(c cid.Cid, p peer.ID) bool {
+func (pwm *peerWantManager) reverseIndexAdd(c bswl.WantKey, p peer.ID) bool {
 	peers, ok := pwm.wantPeers[c]
 	if !ok {
 		peers = make(map[peer.ID]struct{}, 10)
@@ -386,7 +387,7 @@ func (pwm *peerWantManager) reverseIndexAdd(c cid.Cid, p peer.ID) bool {
 }
 
 // Remove the peer from the list of peers that have sent a want with the cid
-func (pwm *peerWantManager) reverseIndexRemove(c cid.Cid, p peer.ID) {
+func (pwm *peerWantManager) reverseIndexRemove(c bswl.WantKey, p peer.ID) {
 	if peers, ok := pwm.wantPeers[c]; ok {
 		delete(peers, p)
 		if len(peers) == 0 {
@@ -396,13 +397,13 @@ func (pwm *peerWantManager) reverseIndexRemove(c cid.Cid, p peer.ID) {
 }
 
 // GetWantBlocks returns the set of all want-blocks sent to all peers
-func (pwm *peerWantManager) getWantBlocks() []cid.Cid {
-	res := cid.NewSet()
+func (pwm *peerWantManager) getWantBlocks() []bswl.WantKey {
+	res := bswl.NewSet()
 
 	// Iterate over all known peers
 	for _, pws := range pwm.peerWants {
 		// Iterate over all want-blocks
-		_ = pws.wantBlocks.ForEach(func(c cid.Cid) error {
+		_ = pws.wantBlocks.ForEach(func(c bswl.WantKey) error {
 			// Add the CID to the results
 			res.Add(c)
 			return nil
@@ -413,19 +414,19 @@ func (pwm *peerWantManager) getWantBlocks() []cid.Cid {
 }
 
 // GetWantHaves returns the set of all want-haves sent to all peers
-func (pwm *peerWantManager) getWantHaves() []cid.Cid {
-	res := cid.NewSet()
+func (pwm *peerWantManager) getWantHaves() []bswl.WantKey {
+	res := bswl.NewSet()
 
 	// Iterate over all peers with active wants.
 	for _, pws := range pwm.peerWants {
 		// Iterate over all want-haves
-		_ = pws.wantHaves.ForEach(func(c cid.Cid) error {
+		_ = pws.wantHaves.ForEach(func(c bswl.WantKey) error {
 			// Add the CID to the results
 			res.Add(c)
 			return nil
 		})
 	}
-	_ = pwm.broadcastWants.ForEach(func(c cid.Cid) error {
+	_ = pwm.broadcastWants.ForEach(func(c bswl.WantKey) error {
 		res.Add(c)
 		return nil
 	})
@@ -434,7 +435,7 @@ func (pwm *peerWantManager) getWantHaves() []cid.Cid {
 }
 
 // GetWants returns the set of all wants (both want-blocks and want-haves).
-func (pwm *peerWantManager) getWants() []cid.Cid {
+func (pwm *peerWantManager) getWants() []bswl.WantKey {
 	res := pwm.broadcastWants.Keys()
 
 	// Iterate over all targeted wants, removing ones that are also in the

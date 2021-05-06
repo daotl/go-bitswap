@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -80,14 +81,14 @@ type MessageQueue struct {
 	// Signals that there are outgoing wants / cancels ready to be processed
 	outgoingWork chan time.Time
 
-	// Channel of CIDs of blocks / HAVEs / DONT_HAVEs received from the peer
-	responses chan []cid.Cid
+	// Channel of WantKeys of blocks / HAVEs / DONT_HAVEs received from the peer
+	responses chan []bswl.WantKey
 
 	// Take lock whenever any of these variables are modified
 	wllock    sync.Mutex
 	bcstWants recallWantlist
 	peerWants recallWantlist
-	cancels   *cid.Set
+	cancels   *bswl.Set
 	priority  int32
 
 	// Dont touch any of these variables outside of run loop
@@ -107,31 +108,31 @@ type recallWantlist struct {
 	// The list of wants that have been sent
 	sent *bswl.Wantlist
 	// The time at which each want was sent
-	sentAt map[cid.Cid]time.Time
+	sentAt map[bswl.WantKey]time.Time
 }
 
 func newRecallWantList() recallWantlist {
 	return recallWantlist{
 		pending: bswl.New(),
 		sent:    bswl.New(),
-		sentAt:  make(map[cid.Cid]time.Time),
+		sentAt:  make(map[bswl.WantKey]time.Time),
 	}
 }
 
 // Add want to the pending list
-func (r *recallWantlist) Add(c cid.Cid, priority int32, wtype pb.Message_Wantlist_WantType) {
+func (r *recallWantlist) Add(c bswl.WantKey, priority int32, wtype pb.Message_Wantlist_WantType) {
 	r.pending.Add(c, priority, wtype)
 }
 
 // Remove wants from both the pending list and the list of sent wants
-func (r *recallWantlist) Remove(c cid.Cid) {
+func (r *recallWantlist) Remove(c bswl.WantKey) {
 	r.pending.Remove(c)
 	r.sent.Remove(c)
 	delete(r.sentAt, c)
 }
 
 // Remove wants by type from both the pending list and the list of sent wants
-func (r *recallWantlist) RemoveType(c cid.Cid, wtype pb.Message_Wantlist_WantType) {
+func (r *recallWantlist) RemoveType(c bswl.WantKey, wtype pb.Message_Wantlist_WantType) {
 	r.pending.RemoveType(c, wtype)
 	r.sent.RemoveType(c, wtype)
 	if _, ok := r.sent.Contains(c); !ok {
@@ -152,7 +153,7 @@ func (r *recallWantlist) MarkSent(e wantlist.Entry) bool {
 }
 
 // SentAt records the time at which a want was sent
-func (r *recallWantlist) SentAt(c cid.Cid, at time.Time) {
+func (r *recallWantlist) SentAt(c bswl.WantKey, at time.Time) {
 	// The want may have been cancelled in the interim
 	if _, ok := r.sent.Contains(c); ok {
 		if _, ok := r.sentAt[c]; !ok {
@@ -164,7 +165,7 @@ func (r *recallWantlist) SentAt(c cid.Cid, at time.Time) {
 // ClearSentAt clears out the record of the time a want was sent.
 // We clear the sent at time when we receive a response for a key as we
 // only need the first response for latency measurement.
-func (r *recallWantlist) ClearSentAt(c cid.Cid) {
+func (r *recallWantlist) ClearSentAt(c bswl.WantKey) {
 	delete(r.sentAt, c)
 }
 
@@ -187,7 +188,7 @@ func (pc *peerConn) Latency() time.Duration {
 
 // Fires when a timeout occurs waiting for a response from a peer running an
 // older version of Bitswap that doesn't support DONT_HAVE messages.
-type OnDontHaveTimeout func(peer.ID, []cid.Cid)
+type OnDontHaveTimeout func(peer.ID, []bswl.WantKey)
 
 // DontHaveTimeoutManager pings a peer to estimate latency so it can set a reasonable
 // upper bound on when to consider a DONT_HAVE request as timed out (when connected to
@@ -199,16 +200,16 @@ type DontHaveTimeoutManager interface {
 	Shutdown()
 	// AddPending adds the wants as pending a response. If the are not
 	// cancelled before the timeout, the OnDontHaveTimeout method will be called.
-	AddPending([]cid.Cid)
+	AddPending([]bswl.WantKey)
 	// CancelPending removes the wants
-	CancelPending([]cid.Cid)
+	CancelPending([]bswl.WantKey)
 	// UpdateMessageLatency informs the manager of a new latency measurement
 	UpdateMessageLatency(time.Duration)
 }
 
 // New creates a new MessageQueue.
 func New(ctx context.Context, p peer.ID, network MessageNetwork, onDontHaveTimeout OnDontHaveTimeout) *MessageQueue {
-	onTimeout := func(ks []cid.Cid) {
+	onTimeout := func(ks []bswl.WantKey) {
 		log.Infow("Bitswap: timeout waiting for blocks", "cids", ks, "peer", p)
 		onDontHaveTimeout(p, ks)
 	}
@@ -236,9 +237,9 @@ func newMessageQueue(
 		maxMessageSize:      maxMsgSize,
 		bcstWants:           newRecallWantList(),
 		peerWants:           newRecallWantList(),
-		cancels:             cid.NewSet(),
+		cancels:             bswl.NewSet(),
 		outgoingWork:        make(chan time.Time, 1),
-		responses:           make(chan []cid.Cid, 8),
+		responses:           make(chan []bswl.WantKey, 8),
 		rebroadcastInterval: defaultRebroadcastInterval,
 		sendErrorBackoff:    sendErrorBackoff,
 		maxValidLatency:     maxValidLatency,
@@ -250,11 +251,13 @@ func newMessageQueue(
 }
 
 // Add want-haves that are part of a broadcast to all connected peers
-func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid) {
+func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []bswl.WantKey) {
 	if len(wantHaves) == 0 {
 		return
 	}
 
+	// do filter before sending broadcast want
+	wantHaves = ac.FilterKeys(wantHaves, mq.p)
 	mq.wllock.Lock()
 	defer mq.wllock.Unlock()
 
@@ -272,7 +275,7 @@ func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid) {
 }
 
 // Add want-haves and want-blocks for the peer for this message queue.
-func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid) {
+func (mq *MessageQueue) AddWants(wantBlocks []bswl.WantKey, wantHaves []bswl.WantKey) {
 	if len(wantBlocks) == 0 && len(wantHaves) == 0 {
 		return
 	}
@@ -302,7 +305,7 @@ func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid) {
 }
 
 // Add cancel messages for the given keys.
-func (mq *MessageQueue) AddCancels(cancelKs []cid.Cid) {
+func (mq *MessageQueue) AddCancels(cancelKs []bswl.WantKey) {
 	if len(cancelKs) == 0 {
 		return
 	}
@@ -344,7 +347,7 @@ func (mq *MessageQueue) AddCancels(cancelKs []cid.Cid) {
 // ResponseReceived is called when a message is received from the network.
 // ks is the set of blocks, HAVEs and DONT_HAVEs in the message
 // Note that this is just used to calculate latency.
-func (mq *MessageQueue) ResponseReceived(ks []cid.Cid) {
+func (mq *MessageQueue) ResponseReceived(ks []bswl.WantKey) {
 	if len(ks) == 0 {
 		return
 	}
@@ -362,6 +365,7 @@ func (mq *MessageQueue) SetRebroadcastInterval(delay time.Duration) {
 	mq.rebroadcastIntervalLk.Lock()
 	mq.rebroadcastInterval = delay
 	if mq.rebroadcastTimer != nil {
+		// TODO: it is only called in test, stop first?
 		mq.rebroadcastTimer.Reset(delay)
 	}
 	mq.rebroadcastIntervalLk.Unlock()
@@ -544,7 +548,7 @@ func (mq *MessageQueue) sendMessage() {
 // mitigate getting blocked by a peer that takes a long time to respond.
 func (mq *MessageQueue) simulateDontHaveWithTimeout(wantlist []bsmsg.Entry) {
 	// Get the CID of each want-block that expects a DONT_HAVE response
-	wants := make([]cid.Cid, 0, len(wantlist))
+	wants := make([]bswl.WantKey, 0, len(wantlist))
 
 	mq.wllock.Lock()
 
@@ -567,7 +571,7 @@ func (mq *MessageQueue) simulateDontHaveWithTimeout(wantlist []bsmsg.Entry) {
 
 // handleResponse is called when a response is received from the peer,
 // with the CIDs of received blocks / HAVEs / DONT_HAVEs
-func (mq *MessageQueue) handleResponse(ks []cid.Cid) {
+func (mq *MessageQueue) handleResponse(ks []wantlist.WantKey) {
 	now := time.Now()
 	earliest := time.Time{}
 
@@ -766,14 +770,14 @@ FINISH:
 		if !mq.peerWants.MarkSent(e) {
 			// It changed.
 			mq.msg.Remove(e.Key)
-			peerEntries[i].Key = cid.Undef
+			peerEntries[i].Key.Cid = cid.Undef
 		}
 	}
 
 	for i, e := range bcstEntries[:sentBcstEntries] {
 		if !mq.bcstWants.MarkSent(e) {
 			mq.msg.Remove(e.Key)
-			bcstEntries[i].Key = cid.Undef
+			bcstEntries[i].Key.Cid = cid.Undef
 		}
 	}
 
@@ -795,13 +799,13 @@ FINISH:
 		defer mq.wllock.Unlock()
 
 		for _, e := range peerEntries[:sentPeerEntries] {
-			if e.Key.Defined() { // Check if want was cancelled in the interim
+			if e.Key.Cid.Defined() { // Check if want was cancelled in the interim
 				mq.peerWants.SentAt(e.Key, now)
 			}
 		}
 
 		for _, e := range bcstEntries[:sentBcstEntries] {
-			if e.Key.Defined() { // Check if want was cancelled in the interim
+			if e.Key.Cid.Defined() { // Check if want was cancelled in the interim
 				mq.bcstWants.SentAt(e.Key, now)
 			}
 		}

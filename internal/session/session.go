@@ -6,6 +6,7 @@ import (
 	"time"
 
 	ac "github.com/daotl/go-bitswap/accesscontrol"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -41,12 +42,12 @@ type PeerManager interface {
 	// interested in a peer's connection state
 	UnregisterSession(uint64)
 	// SendWants tells the PeerManager to send wants to the given peer
-	SendWants(ctx context.Context, peerId peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid)
+	SendWants(ctx context.Context, peerId peer.ID, wantBlocks []wl.WantKey, wantHaves []wl.WantKey)
 	// BroadcastWantHaves sends want-haves to all connected peers (used for
 	// session discovery)
-	BroadcastWantHaves(context.Context, []cid.Cid)
+	BroadcastWantHaves(context.Context, []wl.WantKey)
 	// SendCancels tells the PeerManager to send cancels to all peers
-	SendCancels(context.Context, []cid.Cid)
+	SendCancels(context.Context, []wl.WantKey)
 }
 
 // SessionManager manages all the sessions
@@ -54,7 +55,7 @@ type SessionManager interface {
 	// Remove a session (called when the session shuts down)
 	RemoveSession(sesid uint64)
 	// Cancel wants (called when a call to GetBlocks() is cancelled)
-	CancelSessionWants(sid uint64, wants []cid.Cid)
+	CancelSessionWants(sid uint64, wants []wl.WantKey)
 }
 
 // SessionPeerManager keeps track of peers in the session
@@ -181,7 +182,7 @@ func New(
 		self:                self,
 		ch:                  ch,
 	}
-	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
+	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted, s.ch)
 
 	go s.run(ctx)
 
@@ -197,7 +198,7 @@ func (s *Session) Shutdown() {
 }
 
 // ReceiveFrom receives incoming blocks from the given peer.
-func (s *Session) ReceiveFrom(from peer.ID, ks []cid.Cid, haves []cid.Cid, dontHaves []cid.Cid) {
+func (s *Session) ReceiveFrom(from peer.ID, ks []wl.WantKey, haves []wl.WantKey, dontHaves []wl.WantKey) {
 	// The SessionManager tells each Session about all keys that it may be
 	// interested in. Here the Session filters the keys to the ones that this
 	// particular Session is interested in.
@@ -207,8 +208,11 @@ func (s *Session) ReceiveFrom(from peer.ID, ks []cid.Cid, haves []cid.Cid, dontH
 	dontHaves = interestedRes[2]
 	s.logReceiveFrom(from, ks, haves, dontHaves)
 
+	cidks := wl.KeysToCids(ks)
+	cidHaves := wl.KeysToCids(haves)
+	cidDontHaves := wl.KeysToCids(dontHaves)
 	// Inform the session want sender that a message has been received
-	s.sws.Update(from, ks, haves, dontHaves)
+	s.sws.Update(from, cidks, cidHaves, cidDontHaves)
 
 	if len(ks) == 0 {
 		return
@@ -216,12 +220,12 @@ func (s *Session) ReceiveFrom(from peer.ID, ks []cid.Cid, haves []cid.Cid, dontH
 
 	// Inform the session that blocks have been received
 	select {
-	case s.incoming <- op{op: opReceive, keys: ks}:
+	case s.incoming <- op{op: opReceive, keys: cidks}:
 	case <-s.ctx.Done():
 	}
 }
 
-func (s *Session) logReceiveFrom(from peer.ID, interestedKs []cid.Cid, haves []cid.Cid, dontHaves []cid.Cid) {
+func (s *Session) logReceiveFrom(from peer.ID, interestedKs []wl.WantKey, haves []wl.WantKey, dontHaves []wl.WantKey) {
 	// Save some CPU cycles if log level is higher than debug
 	if ce := sflog.Check(zap.DebugLevel, "Bitswap <- rcv message"); ce == nil {
 		return
@@ -250,11 +254,12 @@ func (s *Session) GetBlockFromChannel(parent context.Context, ch exchange.Channe
 		return nil, ErrSessionChannelMismatch
 	}
 	ok, err := ac.GlobalFilter(s.self, ch, k)
-	if ok {
-		return bsgetter.SyncGetBlock(parent, k, s.GetBlocks)
-	} else {
+	if !ok {
 		return nil, err
 	}
+	return bsgetter.SyncGetBlock(parent, k, func(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+		return s.GetBlocksFromChannel(ctx, ch, cids)
+	})
 }
 
 // GetBlocks fetches a set of public blocks within the context of this session
@@ -269,14 +274,16 @@ func (s *Session) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.
 // blocks will be returned on. No order is guaranteed on the returned blocks.
 func (s *Session) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
 	<-chan blocks.Block, error) {
+	ans := make(chan blocks.Block)
+	close(ans)
 	if ch != s.ch {
-		return nil, ErrSessionChannelMismatch
+		return ans, ErrSessionChannelMismatch
 	}
 	// return if any key can't pass
 	for _, key := range keys {
 		ok, err := ac.GlobalFilter(s.self, ch, key)
 		if !ok {
-			return nil, err
+			return ans, err
 		}
 	}
 
@@ -413,7 +420,7 @@ func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
 }
 
 // handlePeriodicSearch is called periodically to search for providers of a
-// randomly chosen CID in the sesssion.
+// randomly chosen CID in the session.
 func (s *Session) handlePeriodicSearch(ctx context.Context) {
 	randomWant := s.sw.RandomLiveWant()
 	if !randomWant.Defined() {
@@ -469,7 +476,11 @@ func (s *Session) handleReceive(ks []cid.Cid) {
 
 	// Inform the SessionInterestManager that this session is no longer
 	// expecting to receive the wanted keys
-	s.sim.RemoveSessionWants(s.id, wanted)
+	keys := make([]wl.WantKey, len(wanted))
+	for _, k := range wanted {
+		keys = append(keys, wl.NewWantKey(k, s.ch))
+	}
+	s.sim.RemoveSessionWants(s.id, keys)
 
 	s.idleTick.Stop()
 
@@ -482,9 +493,10 @@ func (s *Session) handleReceive(ks []cid.Cid) {
 
 // wantBlocks is called when blocks are requested by the client
 func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
+	keys := wl.CidsToKeys(newks, s.ch)
 	if len(newks) > 0 {
 		// Inform the SessionInterestManager that this session is interested in the keys
-		s.sim.RecordSessionInterest(s.id, newks)
+		s.sim.RecordSessionInterest(s.id, keys)
 		// Tell the sessionWants tracker that that the wants have been requested
 		s.sw.BlocksRequested(newks)
 		// Tell the sessionWantSender that the blocks have been requested
@@ -508,7 +520,7 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 // Send want-haves to all connected peers
 func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
-	s.pm.BroadcastWantHaves(ctx, wants)
+	s.pm.BroadcastWantHaves(ctx, wl.CidsToKeys(wants, s.ch))
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive

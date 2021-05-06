@@ -20,6 +20,22 @@ func NewWantKey(cid cid.Cid, ch exchange.Channel) WantKey {
 	return WantKey{Cid: cid, Ch: ch}
 }
 
+func CidsToKeys(cids []cid.Cid, ch exchange.Channel) []WantKey {
+	keys := make([]WantKey, 0, len(cids))
+	for _, c := range cids {
+		keys = append(keys, NewWantKey(c, ch))
+	}
+	return keys
+}
+
+func KeysToCids(keys []WantKey) []cid.Cid {
+	cids := make([]cid.Cid, 0, len(keys))
+	for _, key := range keys {
+		cids = append(cids, key.Cid)
+	}
+	return cids
+}
+
 // Wantlist is a raw list of wanted blocks and their priorities
 type Wantlist struct {
 	set map[WantKey]Entry

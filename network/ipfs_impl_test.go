@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	wl "github.com/daotl/go-bitswap/wantlist"
 	ds "github.com/daotl/go-datastore"
 	"github.com/daotl/go-datastore/key"
 	mockrouting "github.com/daotl/go-ipfs-routing/mock"
@@ -205,8 +206,8 @@ func TestMessageSendAndReceive(t *testing.T) {
 	block1 := blockGenerator.Next()
 	block2 := blockGenerator.Next()
 	sent := bsmsg.New(false)
-	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
-	sent.AddBlock(block2)
+	sent.AddEntry(wl.NewWantKey(block1.Cid(), ""), 1, pb.Message_Wantlist_Block, true)
+	sent.AddBlock(bsmsg.NewMsgBlock(block2, ""))
 
 	err = bsnet1.SendMessage(ctx, p2.ID(), sent)
 	if err != nil {
@@ -317,7 +318,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	blockGenerator := blocksutil.NewBlockGenerator()
 	block1 := blockGenerator.Next()
 	msg := bsmsg.New(false)
-	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
+	msg.AddEntry(wl.NewWantKey(block1.Cid(), ""), 1, pb.Message_Wantlist_Block, true)
 
 	return eh1, bsnet1, eh2, bsnet2, msg
 }

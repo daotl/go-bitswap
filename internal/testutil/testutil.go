@@ -30,6 +30,20 @@ func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
 	return generatedBlocks
 }
 
+// GenerateBlocksOfSize generates a series of blocks of the given byte size
+func GenerateMsgBlocksOfSize(n int, size int64) []bsmsg.MsgBlock {
+	generatedBlocks := make([]bsmsg.MsgBlock, 0, n)
+	for i := 0; i < n; i++ {
+		// rand.Read never errors
+		buf := make([]byte, size)
+		rand.Read(buf)
+		b := blocks.NewBlock(buf)
+		generatedBlocks = append(generatedBlocks, bsmsg.NewMsgBlock(b, ""))
+
+	}
+	return generatedBlocks
+}
+
 // GenerateCids produces n content identifiers.
 func GenerateCids(n int) []cid.Cid {
 	cids := make([]cid.Cid, 0, n)
@@ -40,13 +54,23 @@ func GenerateCids(n int) []cid.Cid {
 	return cids
 }
 
+// GenerateCids produces n content identifiers.
+func GenerateWantKeys(n int) []wantlist.WantKey {
+	keys := make([]wantlist.WantKey, 0, n)
+	for i := 0; i < n; i++ {
+		c := blockGenerator.Next().Cid()
+		keys = append(keys, wantlist.NewWantKey(c, ""))
+	}
+	return keys
+}
+
 // GenerateMessageEntries makes fake bitswap message entries.
 func GenerateMessageEntries(n int, isCancel bool) []bsmsg.Entry {
 	bsmsgs := make([]bsmsg.Entry, 0, n)
 	for i := 0; i < n; i++ {
 		prioritySeq++
 		msg := bsmsg.Entry{
-			Entry:  wantlist.NewRefEntry(blockGenerator.Next().Cid(), prioritySeq),
+			Entry:  wantlist.NewRefEntry(blockGenerator.Next().Cid(), prioritySeq, ""),
 			Cancel: isCancel,
 		}
 		bsmsgs = append(bsmsgs, msg)
@@ -110,15 +134,33 @@ func ContainsKey(ks []cid.Cid, c cid.Cid) bool {
 	return false
 }
 
-// MatchKeysIgnoreOrder returns true if the lists of CIDs match (even if
+// MatchCidsIgnoreOrder returns true if the lists of CIDs match (even if
 // they're in a different order)
-func MatchKeysIgnoreOrder(ks1 []cid.Cid, ks2 []cid.Cid) bool {
+func MatchCidsIgnoreOrder(ks1 []cid.Cid, ks2 []cid.Cid) bool {
 	if len(ks1) != len(ks2) {
 		return false
 	}
 
 	for _, k := range ks1 {
 		if !ContainsKey(ks2, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchKeysIgnoreOrder returns true if the lists of CIDs match (even if
+// they're in a different order)
+func MatchKeysIgnoreOrder(ks1 []wantlist.WantKey, ks2 []wantlist.WantKey) bool {
+	if len(ks1) != len(ks2) {
+		return false
+	}
+	s2 := wantlist.NewSet()
+	for _, key := range ks2 {
+		s2.Add(key)
+	}
+	for _, k := range ks1 {
+		if !s2.Has(k) {
 			return false
 		}
 	}

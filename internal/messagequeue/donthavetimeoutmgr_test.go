@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-cid"
+	bswl "github.com/daotl/go-bitswap/wantlist"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 
 	"github.com/daotl/go-bitswap/internal/testutil"
@@ -44,11 +44,11 @@ func (pc *mockPeerConn) Latency() time.Duration {
 }
 
 type timeoutRecorder struct {
-	timedOutKs []cid.Cid
+	timedOutKs []bswl.WantKey
 	lk         sync.Mutex
 }
 
-func (tr *timeoutRecorder) onTimeout(tks []cid.Cid) {
+func (tr *timeoutRecorder) onTimeout(tks []bswl.WantKey) {
 	tr.lk.Lock()
 	defer tr.lk.Unlock()
 
@@ -70,8 +70,8 @@ func (tr *timeoutRecorder) clear() {
 }
 
 func TestDontHaveTimeoutMgrTimeout(t *testing.T) {
-	firstks := testutil.GenerateCids(2)
-	secondks := append(firstks, testutil.GenerateCids(3)...)
+	firstks := testutil.GenerateWantKeys(2)
+	secondks := append(firstks, testutil.GenerateWantKeys(3)...)
 	latency := time.Millisecond * 20
 	latMultiplier := 2
 	expProcessTime := 5 * time.Millisecond
@@ -121,7 +121,7 @@ func TestDontHaveTimeoutMgrTimeout(t *testing.T) {
 }
 
 func TestDontHaveTimeoutMgrCancel(t *testing.T) {
-	ks := testutil.GenerateCids(3)
+	ks := testutil.GenerateWantKeys(3)
 	latency := time.Millisecond * 10
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
@@ -143,7 +143,7 @@ func TestDontHaveTimeoutMgrCancel(t *testing.T) {
 	dhtm.CancelPending(ks[:cancelCount])
 
 	// Wait for the expected timeout
-	time.Sleep(expectedTimeout)
+	time.Sleep(expectedTimeout + 10*time.Millisecond)
 
 	// At this stage all non-cancelled keys should have timed out
 	if tr.timedOutCount() != len(ks)-cancelCount {
@@ -152,7 +152,7 @@ func TestDontHaveTimeoutMgrCancel(t *testing.T) {
 }
 
 func TestDontHaveTimeoutWantCancelWant(t *testing.T) {
-	ks := testutil.GenerateCids(3)
+	ks := testutil.GenerateWantKeys(3)
 	latency := time.Millisecond * 20
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
@@ -197,7 +197,7 @@ func TestDontHaveTimeoutWantCancelWant(t *testing.T) {
 }
 
 func TestDontHaveTimeoutRepeatedAddPending(t *testing.T) {
-	ks := testutil.GenerateCids(10)
+	ks := testutil.GenerateWantKeys(10)
 	latency := time.Millisecond * 5
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
@@ -211,12 +211,11 @@ func TestDontHaveTimeoutRepeatedAddPending(t *testing.T) {
 
 	// Add keys repeatedly
 	for _, c := range ks {
-		dhtm.AddPending([]cid.Cid{c})
+		dhtm.AddPending([]bswl.WantKey{c})
 	}
 
 	// Wait for the expected timeout
-	time.Sleep(latency + 5*time.Millisecond)
-
+	time.Sleep(latency + 20*time.Millisecond)
 	// At this stage all keys should have timed out
 	if tr.timedOutCount() != len(ks) {
 		t.Fatal("expected timeout")
@@ -224,7 +223,7 @@ func TestDontHaveTimeoutRepeatedAddPending(t *testing.T) {
 }
 
 func TestDontHaveTimeoutMgrMessageLatency(t *testing.T) {
-	ks := testutil.GenerateCids(2)
+	ks := testutil.GenerateWantKeys(2)
 	latency := time.Millisecond * 40
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
@@ -268,7 +267,7 @@ func TestDontHaveTimeoutMgrMessageLatency(t *testing.T) {
 }
 
 func TestDontHaveTimeoutMgrMessageLatencyMax(t *testing.T) {
-	ks := testutil.GenerateCids(2)
+	ks := testutil.GenerateWantKeys(2)
 	pc := &mockPeerConn{latency: time.Second} // ignored
 	tr := timeoutRecorder{}
 	msgLatencyMultiplier := 1
@@ -287,7 +286,7 @@ func TestDontHaveTimeoutMgrMessageLatencyMax(t *testing.T) {
 	dhtm.UpdateMessageLatency(testMaxTimeout * 4)
 
 	// Sleep until just after the maximum timeout
-	time.Sleep(testMaxTimeout + 5*time.Millisecond)
+	time.Sleep(testMaxTimeout + 10*time.Millisecond)
 
 	// Keys should have timed out
 	if tr.timedOutCount() != len(ks) {
@@ -296,7 +295,7 @@ func TestDontHaveTimeoutMgrMessageLatencyMax(t *testing.T) {
 }
 
 func TestDontHaveTimeoutMgrUsesDefaultTimeoutIfPingError(t *testing.T) {
-	ks := testutil.GenerateCids(2)
+	ks := testutil.GenerateWantKeys(2)
 	latency := time.Millisecond * 1
 	latMultiplier := 2
 	expProcessTime := 2 * time.Millisecond
@@ -331,7 +330,7 @@ func TestDontHaveTimeoutMgrUsesDefaultTimeoutIfPingError(t *testing.T) {
 }
 
 func TestDontHaveTimeoutMgrUsesDefaultTimeoutIfLatencyLonger(t *testing.T) {
-	ks := testutil.GenerateCids(2)
+	ks := testutil.GenerateWantKeys(2)
 	latency := time.Millisecond * 20
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
@@ -365,7 +364,7 @@ func TestDontHaveTimeoutMgrUsesDefaultTimeoutIfLatencyLonger(t *testing.T) {
 }
 
 func TestDontHaveTimeoutNoTimeoutAfterShutdown(t *testing.T) {
-	ks := testutil.GenerateCids(2)
+	ks := testutil.GenerateWantKeys(2)
 	latency := time.Millisecond * 10
 	latMultiplier := 1
 	expProcessTime := time.Duration(0)
