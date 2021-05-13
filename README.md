@@ -1,7 +1,7 @@
 go-bitswap
 ==================
 
-DAOT Labs's fork of [ipfs/go-bitswap](https://github.com/ipfs/go-bitswap).
+DAOT Labs' fork of [ipfs/go-bitswap](https://github.com/ipfs/go-bitswap).
 
 [![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](http://ipn.io)
 [![](https://img.shields.io/badge/project-DAOT%20Labs-red.svg?style=flat-square)](http://github.com/daotl)
