@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 
+	"github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	blockstore "github.com/daotl/go-ipfs-blockstore"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 
-	notifications "github.com/daotl/go-bitswap/internal/notifications"
+	"github.com/daotl/go-bitswap/internal/notifications"
 )
 
 var log = logging.Logger("bitswap")
@@ -58,13 +60,13 @@ func SyncGetBlock(p context.Context, k cid.Cid, gb GetBlocksFunc) (blocks.Block,
 }
 
 // WantFunc is any function that can express a want for set of blocks.
-type WantFunc func(context.Context, []cid.Cid)
+type WantFunc func(context.Context, []wl.WantKey)
 
 // AsyncGetBlocks take a set of block cids, a pubsub channel for incoming
 // blocks, a want function, and a close function, and returns a channel of
 // incoming blocks.
-func AsyncGetBlocks(ctx context.Context, sessctx context.Context, keys []cid.Cid, notif notifications.PubSub,
-	want WantFunc, cwants func([]cid.Cid)) (<-chan blocks.Block, error) {
+func AsyncGetBlocks(ctx context.Context, sessctx context.Context, keys []wl.WantKey, notif notifications.PubSub,
+	want WantFunc, cwants func([]wl.WantKey)) (<-chan blocks.Block, error) {
 
 	// If there are no keys supplied, just return a closed channel
 	if len(keys) == 0 {
@@ -74,7 +76,7 @@ func AsyncGetBlocks(ctx context.Context, sessctx context.Context, keys []cid.Cid
 	}
 
 	// Use a PubSub notifier to listen for incoming blocks for each key
-	remaining := cid.NewSet()
+	remaining := wl.NewSet()
 	promise := notif.Subscribe(ctx, keys...)
 	for _, k := range keys {
 		log.Debugw("Bitswap.GetBlockRequest.Start", "cid", k)
@@ -92,8 +94,8 @@ func AsyncGetBlocks(ctx context.Context, sessctx context.Context, keys []cid.Cid
 // Listens for incoming blocks, passing them to the out channel.
 // If the context is cancelled or the incoming channel closes, calls cfun with
 // any keys corresponding to blocks that were never received.
-func handleIncoming(ctx context.Context, sessctx context.Context, remaining *cid.Set,
-	in <-chan blocks.Block, out chan blocks.Block, cfun func([]cid.Cid)) {
+func handleIncoming(ctx context.Context, sessctx context.Context, remaining *wl.Set,
+	in <-chan message.MsgBlock, out chan blocks.Block, cfun func([]wl.WantKey)) {
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -115,7 +117,7 @@ func handleIncoming(ctx context.Context, sessctx context.Context, remaining *cid
 				return
 			}
 
-			remaining.Remove(blk.Cid())
+			remaining.Remove(blk.GetKey())
 			select {
 			case out <- blk:
 			case <-ctx.Done():

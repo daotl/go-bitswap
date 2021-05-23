@@ -101,7 +101,7 @@ func sessionFactory(ctx context.Context,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
 	self peer.ID,
-	ch exchange.Channel) Session {
+) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -132,9 +132,9 @@ func TestReceiveFrom(t *testing.T) {
 
 	p := peer.ID(fmt.Sprint(123))
 	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
-	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 
 	sim.RecordSessionInterest(firstSession.ID(), []wl.WantKey{block.GetKey()})
 	sim.RecordSessionInterest(thirdSession.ID(), []wl.WantKey{block.GetKey()})
@@ -179,9 +179,9 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	p := peer.ID(fmt.Sprint(123))
 	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
-	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	keys := []wl.WantKey{block.GetKey()}
 
 	sim.RecordSessionInterest(firstSession.ID(), keys)
@@ -214,10 +214,10 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	p := peer.ID(fmt.Sprint(123))
 	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
-	secondSession := sm.NewSession(sessionCtx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
+	secondSession := sm.NewSession(sessionCtx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 
 	keys := []wl.WantKey{block.GetKey()}
 	sim.RecordSessionInterest(firstSession.ID(), keys)
@@ -251,7 +251,7 @@ func TestShutdown(t *testing.T) {
 	p := peer.ID(fmt.Sprint(123))
 	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 	keys := []wl.WantKey{block.GetKey()}
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), exchange.PublicChannel).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	sim.RecordSessionInterest(firstSession.ID(), keys)
 	sm.ReceiveFrom(ctx, p, nil, nil, keys)
 

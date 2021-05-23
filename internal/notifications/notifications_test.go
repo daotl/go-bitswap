@@ -6,18 +6,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 )
 
 func TestDuplicates(t *testing.T) {
-	b1 := blocks.NewBlock([]byte("1"))
-	b2 := blocks.NewBlock([]byte("2"))
+	rb1 := blocks.NewBlock([]byte("1"))
+	rb2 := blocks.NewBlock([]byte("2"))
 
+	b1 := message.NewMsgBlock(rb1, "")
+	b2 := message.NewMsgBlock(rb2, "")
 	n := New()
 	defer n.Shutdown()
-	ch := n.Subscribe(context.Background(), b1.Cid(), b2.Cid())
+	ch := n.Subscribe(context.Background(), b1.GetKey(), b2.GetKey())
 
 	n.Publish(b1)
 	blockRecvd, ok := <-ch
@@ -37,11 +40,11 @@ func TestDuplicates(t *testing.T) {
 }
 
 func TestPublishSubscribe(t *testing.T) {
-	blockSent := blocks.NewBlock([]byte("Greetings from The Interval"))
+	blockSent := message.NewMsgBlock(blocks.NewBlock([]byte("Greetings from The Interval")), "")
 
 	n := New()
 	defer n.Shutdown()
-	ch := n.Subscribe(context.Background(), blockSent.Cid())
+	ch := n.Subscribe(context.Background(), blockSent.GetKey())
 
 	n.Publish(blockSent)
 	blockRecvd, ok := <-ch
@@ -54,12 +57,12 @@ func TestPublishSubscribe(t *testing.T) {
 }
 
 func TestSubscribeMany(t *testing.T) {
-	e1 := blocks.NewBlock([]byte("1"))
-	e2 := blocks.NewBlock([]byte("2"))
+	e1 := message.NewMsgBlock(blocks.NewBlock([]byte("1")), "")
+	e2 := message.NewMsgBlock(blocks.NewBlock([]byte("2")), "")
 
 	n := New()
 	defer n.Shutdown()
-	ch := n.Subscribe(context.Background(), e1.Cid(), e2.Cid())
+	ch := n.Subscribe(context.Background(), e1.GetKey(), e2.GetKey())
 
 	n.Publish(e1)
 	r1, ok := <-ch
@@ -79,12 +82,12 @@ func TestSubscribeMany(t *testing.T) {
 // TestDuplicateSubscribe tests a scenario where a given block
 // would be requested twice at the same time.
 func TestDuplicateSubscribe(t *testing.T) {
-	e1 := blocks.NewBlock([]byte("1"))
+	e1 := message.NewMsgBlock(blocks.NewBlock([]byte("1")), "")
 
 	n := New()
 	defer n.Shutdown()
-	ch1 := n.Subscribe(context.Background(), e1.Cid())
-	ch2 := n.Subscribe(context.Background(), e1.Cid())
+	ch1 := n.Subscribe(context.Background(), e1.GetKey())
+	ch2 := n.Subscribe(context.Background(), e1.GetKey())
 
 	n.Publish(e1)
 	r1, ok := <-ch1
@@ -101,11 +104,11 @@ func TestDuplicateSubscribe(t *testing.T) {
 }
 
 func TestShutdownBeforeUnsubscribe(t *testing.T) {
-	e1 := blocks.NewBlock([]byte("1"))
+	e1 := message.NewMsgBlock(blocks.NewBlock([]byte("1")), "")
 
 	n := New()
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := n.Subscribe(ctx, e1.Cid()) // no keys provided
+	ch := n.Subscribe(ctx, e1.GetKey()) // no keys provided
 	n.Shutdown()
 	cancel()
 
@@ -136,8 +139,8 @@ func TestCarryOnWhenDeadlineExpires(t *testing.T) {
 
 	n := New()
 	defer n.Shutdown()
-	block := blocks.NewBlock([]byte("A Missed Connection"))
-	blockChannel := n.Subscribe(fastExpiringCtx, block.Cid())
+	block := message.NewMsgBlock(blocks.NewBlock([]byte("A Missed Connection")), "")
+	blockChannel := n.Subscribe(fastExpiringCtx, block.GetKey())
 
 	assertBlockChannelNil(t, blockChannel)
 }
@@ -151,10 +154,10 @@ func TestDoesNotDeadLockIfContextCancelledBeforePublish(t *testing.T) {
 
 	t.Log("generate a large number of blocks. exceed default buffer")
 	bs := g.Blocks(1000)
-	ks := func() []cid.Cid {
-		var keys []cid.Cid
+	ks := func() []wl.WantKey {
+		var keys []wl.WantKey
 		for _, b := range bs {
-			keys = append(keys, b.Cid())
+			keys = append(keys, wl.NewWantKey(b.Cid(), ""))
 		}
 		return keys
 	}()
@@ -164,24 +167,24 @@ func TestDoesNotDeadLockIfContextCancelledBeforePublish(t *testing.T) {
 	t.Log("cancel context before any blocks published")
 	cancel()
 	for _, b := range bs {
-		n.Publish(b)
+		n.Publish(message.NewMsgBlock(b, ""))
 	}
 
 	t.Log("publishing the large number of blocks to the ignored channel must not deadlock")
 }
 
-func assertBlockChannelNil(t *testing.T, blockChannel <-chan blocks.Block) {
+func assertBlockChannelNil(t *testing.T, blockChannel <-chan message.MsgBlock) {
 	_, ok := <-blockChannel
 	if ok {
 		t.Fail()
 	}
 }
 
-func assertBlocksEqual(t *testing.T, a, b blocks.Block) {
+func assertBlocksEqual(t *testing.T, a, b message.MsgBlock) {
 	if !bytes.Equal(a.RawData(), b.RawData()) {
 		t.Fatal("blocks aren't equal")
 	}
-	if a.Cid() != b.Cid() {
+	if a.GetKey() != b.GetKey() {
 		t.Fatal("block keys aren't equal")
 	}
 }

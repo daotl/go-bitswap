@@ -1,20 +1,24 @@
 package session
 
-import cid "github.com/ipfs/go-cid"
+import (
+	wl "github.com/daotl/go-bitswap/wantlist"
+)
 
-type cidQueue struct {
-	elems []cid.Cid
-	eset  *cid.Set
+// a queue with distinct elements(wantKeys), supporting access by key besides pushing and popping.
+// not routine-safe
+type wantKeyQueue struct {
+	elems []wl.WantKey
+	eset  *wl.Set
 }
 
-func newCidQueue() *cidQueue {
-	return &cidQueue{eset: cid.NewSet()}
+func newKeyQueue() *wantKeyQueue {
+	return &wantKeyQueue{eset: wl.NewSet()}
 }
 
-func (cq *cidQueue) Pop() cid.Cid {
+func (cq *wantKeyQueue) Pop() wl.WantKey {
 	for {
 		if len(cq.elems) == 0 {
-			return cid.Cid{}
+			return wl.WantKey{}
 		}
 
 		out := cq.elems[0]
@@ -27,7 +31,7 @@ func (cq *cidQueue) Pop() cid.Cid {
 	}
 }
 
-func (cq *cidQueue) Cids() []cid.Cid {
+func (cq *wantKeyQueue) Cids() []wl.WantKey {
 	// Lazily delete from the list any cids that were removed from the set
 	if len(cq.elems) > cq.eset.Len() {
 		i := 0
@@ -41,23 +45,23 @@ func (cq *cidQueue) Cids() []cid.Cid {
 	}
 
 	// Make a copy of the cids
-	return append([]cid.Cid{}, cq.elems...)
+	return append([]wl.WantKey{}, cq.elems...)
 }
 
-func (cq *cidQueue) Push(c cid.Cid) {
+func (cq *wantKeyQueue) Push(c wl.WantKey) {
 	if cq.eset.Visit(c) {
 		cq.elems = append(cq.elems, c)
 	}
 }
 
-func (cq *cidQueue) Remove(c cid.Cid) {
+func (cq *wantKeyQueue) Remove(c wl.WantKey) {
 	cq.eset.Remove(c)
 }
 
-func (cq *cidQueue) Has(c cid.Cid) bool {
+func (cq *wantKeyQueue) Has(c wl.WantKey) bool {
 	return cq.eset.Has(c)
 }
 
-func (cq *cidQueue) Len() int {
+func (cq *wantKeyQueue) Len() int {
 	return cq.eset.Len()
 }

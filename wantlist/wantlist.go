@@ -52,6 +52,10 @@ func (k WantKey) Equals(k1 WantKey) bool {
 	return k == k1
 }
 
+func (k WantKey) Defined() bool {
+	return k != WantKey{}
+}
+
 // NewRefEntry creates a new reference tracked wantlist entry.
 func NewRefEntry(c cid.Cid, p int32, ch exchange.Channel) Entry {
 	return Entry{

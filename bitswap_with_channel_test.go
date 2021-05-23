@@ -39,7 +39,7 @@ func TestWithChannel(t *testing.T) {
 	ac.GlobalFilter = ac.FixedChannel(NonPublicChannel, []peer.ID{a.Peer, b.Peer}, []cid.Cid{cid0})
 	defer ac.ResetFilter()
 	// Create a session on Peer A
-	sesa := a.Exchange.NewSessionForChannel(ctx, NonPublicChannel)
+	sesa := a.Exchange.NewSession(ctx)
 
 	// Get the block 0, should success
 	blkout, err := sesa.GetBlockFromChannel(ctx, NonPublicChannel, cid0)

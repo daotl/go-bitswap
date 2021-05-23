@@ -100,7 +100,7 @@ const (
 
 type op struct {
 	op   opType
-	keys []cid.Cid
+	keys []wl.WantKey
 }
 
 // Session holds state for an individual bitswap transfer operation.
@@ -115,9 +115,6 @@ type Session struct {
 	sprm           SessionPeerManager
 	providerFinder ProviderFinder
 	sim            *bssim.SessionInterestManager
-
-	// incoming requests' channel must be equal to this `ch`
-	ch exchange.Channel
 
 	sw  sessionWants
 	sws sessionWantSender
@@ -158,7 +155,7 @@ func New(
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
 	self peer.ID,
-	ch exchange.Channel) *Session {
+) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -180,9 +177,8 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
-		ch:                  ch,
 	}
-	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted, s.ch)
+	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
 	go s.run(ctx)
 
@@ -208,11 +204,8 @@ func (s *Session) ReceiveFrom(from peer.ID, ks []wl.WantKey, haves []wl.WantKey,
 	dontHaves = interestedRes[2]
 	s.logReceiveFrom(from, ks, haves, dontHaves)
 
-	cidks := wl.KeysToCids(ks)
-	cidHaves := wl.KeysToCids(haves)
-	cidDontHaves := wl.KeysToCids(dontHaves)
 	// Inform the session want sender that a message has been received
-	s.sws.Update(from, cidks, cidHaves, cidDontHaves)
+	s.sws.Update(from, ks, haves, dontHaves)
 
 	if len(ks) == 0 {
 		return
@@ -220,7 +213,7 @@ func (s *Session) ReceiveFrom(from peer.ID, ks []wl.WantKey, haves []wl.WantKey,
 
 	// Inform the session that blocks have been received
 	select {
-	case s.incoming <- op{op: opReceive, keys: cidks}:
+	case s.incoming <- op{op: opReceive, keys: ks}:
 	case <-s.ctx.Done():
 	}
 }
@@ -250,9 +243,6 @@ func (s *Session) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, err
 // GetBlockFromChannel fetches a single block form the specified exchange channel.
 func (s *Session) GetBlockFromChannel(parent context.Context, ch exchange.Channel, k cid.Cid) (
 	blocks.Block, error) {
-	if ch != s.ch {
-		return nil, ErrSessionChannelMismatch
-	}
 	ok, err := ac.GlobalFilter(s.self, ch, k)
 	if !ok {
 		return nil, err
@@ -274,30 +264,30 @@ func (s *Session) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.
 // blocks will be returned on. No order is guaranteed on the returned blocks.
 func (s *Session) GetBlocksFromChannel(ctx context.Context, ch exchange.Channel, keys []cid.Cid) (
 	<-chan blocks.Block, error) {
-	ans := make(chan blocks.Block)
-	close(ans)
-	if ch != s.ch {
-		return ans, ErrSessionChannelMismatch
-	}
+
 	// return if any key can't pass
 	for _, key := range keys {
 		ok, err := ac.GlobalFilter(s.self, ch, key)
 		if !ok {
+			ans := make(chan blocks.Block)
+			close(ans)
 			return ans, err
 		}
 	}
 
+	wkeys := wl.CidsToKeys(keys, ch)
+
 	ctx = logging.ContextWithLoggable(ctx, s.uuid)
 
-	return bsgetter.AsyncGetBlocks(ctx, s.ctx, keys, s.notif,
-		func(ctx context.Context, keys []cid.Cid) {
+	return bsgetter.AsyncGetBlocks(ctx, s.ctx, wkeys, s.notif,
+		func(ctx context.Context, keys []wl.WantKey) {
 			select {
 			case s.incoming <- op{op: opWant, keys: keys}:
 			case <-ctx.Done():
 			case <-s.ctx.Done():
 			}
 		},
-		func(keys []cid.Cid) {
+		func(keys []wl.WantKey) {
 			select {
 			case s.incoming <- op{op: opCancel, keys: keys}:
 			case <-s.ctx.Done():
@@ -315,14 +305,14 @@ func (s *Session) SetBaseTickDelay(baseTickDelay time.Duration) {
 }
 
 // onWantsSent is called when wants are sent to a peer by the session wants sender
-func (s *Session) onWantsSent(p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid) {
+func (s *Session) onWantsSent(p peer.ID, wantBlocks []wl.WantKey, wantHaves []wl.WantKey) {
 	allBlks := append(wantBlocks[:len(wantBlocks):len(wantBlocks)], wantHaves...)
 	s.nonBlockingEnqueue(op{op: opWantsSent, keys: allBlks})
 }
 
 // onPeersExhausted is called when all available peers have sent DONT_HAVE for
 // a set of cids (or all peers become unavailable)
-func (s *Session) onPeersExhausted(ks []cid.Cid) {
+func (s *Session) onPeersExhausted(ks []wl.WantKey) {
 	s.nonBlockingEnqueue(op{op: opBroadcast, keys: ks})
 }
 
@@ -392,7 +382,7 @@ func (s *Session) run(ctx context.Context) {
 // Called when the session hasn't received any blocks for some time, or when
 // all peers in the session have sent DONT_HAVE for a particular set of CIDs.
 // Send want-haves to all connected peers, and search for new peers with the CID.
-func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
+func (s *Session) broadcast(ctx context.Context, wants []wl.WantKey) {
 	// If this broadcast is because of an idle timeout (we haven't received
 	// any blocks for a while) then broadcast all pending wants
 	if wants == nil {
@@ -431,19 +421,19 @@ func (s *Session) handlePeriodicSearch(ctx context.Context) {
 	// for new providers for blocks.
 	s.findMorePeers(ctx, randomWant)
 
-	s.broadcastWantHaves(ctx, []cid.Cid{randomWant})
+	s.broadcastWantHaves(ctx, []wl.WantKey{randomWant})
 
 	s.periodicSearchTimer.Reset(s.periodicSearchDelay.NextWaitTime())
 }
 
 // findMorePeers attempts to find more peers for a session by searching for
 // providers for the given Cid
-func (s *Session) findMorePeers(ctx context.Context, c cid.Cid) {
-	go func(k cid.Cid) {
-		for p := range s.providerFinder.FindProvidersAsync(ctx, k) {
+func (s *Session) findMorePeers(ctx context.Context, c wl.WantKey) {
+	go func(k wl.WantKey) {
+		for p := range s.providerFinder.FindProvidersAsync(ctx, k.Cid) {
 			// When a provider indicates that it has a cid, it's equivalent to
 			// the providing peer sending a HAVE
-			s.sws.Update(p, nil, []cid.Cid{c}, nil)
+			s.sws.Update(p, nil, []wl.WantKey{k}, nil)
 		}
 	}(c)
 }
@@ -463,7 +453,7 @@ func (s *Session) handleShutdown() {
 }
 
 // handleReceive is called when the session receives blocks from a peer
-func (s *Session) handleReceive(ks []cid.Cid) {
+func (s *Session) handleReceive(ks []wl.WantKey) {
 	// Record which blocks have been received and figure out the total latency
 	// for fetching the blocks
 	wanted, totalLatency := s.sw.BlocksReceived(ks)
@@ -476,11 +466,7 @@ func (s *Session) handleReceive(ks []cid.Cid) {
 
 	// Inform the SessionInterestManager that this session is no longer
 	// expecting to receive the wanted keys
-	keys := make([]wl.WantKey, len(wanted))
-	for _, k := range wanted {
-		keys = append(keys, wl.NewWantKey(k, s.ch))
-	}
-	s.sim.RemoveSessionWants(s.id, keys)
+	s.sim.RemoveSessionWants(s.id, ks)
 
 	s.idleTick.Stop()
 
@@ -492,11 +478,10 @@ func (s *Session) handleReceive(ks []cid.Cid) {
 }
 
 // wantBlocks is called when blocks are requested by the client
-func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
-	keys := wl.CidsToKeys(newks, s.ch)
+func (s *Session) wantBlocks(ctx context.Context, newks []wl.WantKey) {
 	if len(newks) > 0 {
 		// Inform the SessionInterestManager that this session is interested in the keys
-		s.sim.RecordSessionInterest(s.id, keys)
+		s.sim.RecordSessionInterest(s.id, newks)
 		// Tell the sessionWants tracker that that the wants have been requested
 		s.sw.BlocksRequested(newks)
 		// Tell the sessionWantSender that the blocks have been requested
@@ -518,9 +503,9 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 }
 
 // Send want-haves to all connected peers
-func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
+func (s *Session) broadcastWantHaves(ctx context.Context, wants []wl.WantKey) {
 	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
-	s.pm.BroadcastWantHaves(ctx, wl.CidsToKeys(wants, s.ch))
+	s.pm.BroadcastWantHaves(ctx, wants)
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive
