@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
+	"github.com/daotl/go-ipld-channel/pair"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
@@ -40,13 +41,24 @@ func GenerateCids(n int) []cid.Cid {
 	return cids
 }
 
+// GenerateCidChannelPairs produces n CidChannelPairs.
+// TODO: GenerateCidChannelPairs should generate random IPLD channels
+func GenerateCidChannelPairs(n int) []pair.CidChannelPair {
+	pairs := make([]pair.CidChannelPair, 0, n)
+	for i := 0; i < n; i++ {
+		c := blockGenerator.Next().Cid()
+		pairs = append(pairs, pair.PublicCidPair(c))
+	}
+	return pairs
+}
+
 // GenerateMessageEntries makes fake bitswap message entries.
 func GenerateMessageEntries(n int, isCancel bool) []bsmsg.Entry {
 	bsmsgs := make([]bsmsg.Entry, 0, n)
 	for i := 0; i < n; i++ {
 		prioritySeq++
 		msg := bsmsg.Entry{
-			Entry:  wantlist.NewRefEntry(blockGenerator.Next().Cid(), prioritySeq),
+			Entry:  wantlist.NewRefEntry(pair.PublicCidPair(blockGenerator.Next().Cid()), prioritySeq),
 			Cancel: isCancel,
 		}
 		bsmsgs = append(bsmsgs, msg)
@@ -110,15 +122,33 @@ func ContainsKey(ks []cid.Cid, c cid.Cid) bool {
 	return false
 }
 
-// MatchKeysIgnoreOrder returns true if the lists of CIDs match (even if
+// MatchCidsIgnoreOrder returns true if the lists of CIDs match (even if
 // they're in a different order)
-func MatchKeysIgnoreOrder(ks1 []cid.Cid, ks2 []cid.Cid) bool {
-	if len(ks1) != len(ks2) {
+func MatchCidsIgnoreOrder(cs1 []cid.Cid, cs2 []cid.Cid) bool {
+	if len(cs1) != len(cs2) {
 		return false
 	}
 
-	for _, k := range ks1 {
-		if !ContainsKey(ks2, k) {
+	for _, k := range cs1 {
+		if !ContainsKey(cs2, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchPairsIgnoreOrder returns true if the lists of CidChannelPairs match
+// (even if they're in a different order)
+func MatchPairsIgnoreOrder(ps1 []pair.CidChannelPair, ps2 []pair.CidChannelPair) bool {
+	if len(ps1) != len(ps2) {
+		return false
+	}
+	s2 := pair.NewSet()
+	for _, key := range ps2 {
+		s2.Add(key)
+	}
+	for _, k := range ps1 {
+		if !s2.Has(k) {
 			return false
 		}
 	}

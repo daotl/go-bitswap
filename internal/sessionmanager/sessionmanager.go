@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	bswl "github.com/daotl/go-bitswap/wantlist"
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
-	"github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	"github.com/libp2p/go-libp2p-core/peer"
 
@@ -20,7 +20,7 @@ import (
 type Session interface {
 	exchange.Fetcher
 	ID() uint64
-	ReceiveFrom(peer.ID, []cid.Cid, []cid.Cid, []cid.Cid)
+	ReceiveFrom(peer.ID, []bswl.WantKey, []bswl.WantKey, []bswl.WantKey)
 	Shutdown()
 }
 
@@ -36,7 +36,8 @@ type SessionFactory func(
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session
+	self peer.ID,
+) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -84,12 +85,12 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 // session manager.
 func (sm *SessionManager) NewSession(ctx context.Context,
 	provSearchDelay time.Duration,
-	rebroadcastDelay delay.D) exchange.Fetcher {
+	rebroadcastDelay delay.D,
+) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
 	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self)
-
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
 		sm.sessions[id] = session
@@ -145,7 +146,7 @@ func (sm *SessionManager) GetNextSessionID() uint64 {
 }
 
 // ReceiveFrom is called when a new message is received
-func (sm *SessionManager) ReceiveFrom(ctx context.Context, p peer.ID, blks []cid.Cid, haves []cid.Cid, dontHaves []cid.Cid) {
+func (sm *SessionManager) ReceiveFrom(ctx context.Context, p peer.ID, blks []bswl.WantKey, haves []bswl.WantKey, dontHaves []bswl.WantKey) {
 	// Record block presence for HAVE / DONT_HAVE
 	sm.blockPresenceManager.ReceiveFrom(p, haves, dontHaves)
 
@@ -170,14 +171,14 @@ func (sm *SessionManager) ReceiveFrom(ctx context.Context, p peer.ID, blks []cid
 
 // CancelSessionWants is called when a session cancels wants because a call to
 // GetBlocks() is cancelled
-func (sm *SessionManager) CancelSessionWants(sesid uint64, wants []cid.Cid) {
+func (sm *SessionManager) CancelSessionWants(sesid uint64, wants []bswl.WantKey) {
 	// Remove session's interest in the given blocks - returns the keys that no
 	// session is interested in anymore.
 	cancelKs := sm.sessionInterestManager.RemoveSessionInterested(sesid, wants)
 	sm.cancelWants(cancelKs)
 }
 
-func (sm *SessionManager) cancelWants(wants []cid.Cid) {
+func (sm *SessionManager) cancelWants(wants []bswl.WantKey) {
 	// Free up block presence tracking for keys that no session is interested
 	// in anymore
 	sm.blockPresenceManager.RemoveKeys(wants)

@@ -1,25 +1,25 @@
 package session
 
 import (
-	cid "github.com/ipfs/go-cid"
-	peer "github.com/libp2p/go-libp2p-core/peer"
+	wl "github.com/daotl/go-bitswap/wantlist"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 // sentWantBlocksTracker keeps track of which peers we've sent a want-block to
 type sentWantBlocksTracker struct {
-	sentWantBlocks map[peer.ID]map[cid.Cid]struct{}
+	sentWantBlocks map[peer.ID]map[wl.WantKey]struct{}
 }
 
 func newSentWantBlocksTracker() *sentWantBlocksTracker {
 	return &sentWantBlocksTracker{
-		sentWantBlocks: make(map[peer.ID]map[cid.Cid]struct{}),
+		sentWantBlocks: make(map[peer.ID]map[wl.WantKey]struct{}),
 	}
 }
 
-func (s *sentWantBlocksTracker) addSentWantBlocksTo(p peer.ID, ks []cid.Cid) {
+func (s *sentWantBlocksTracker) addSentWantBlocksTo(p peer.ID, ks []wl.WantKey) {
 	cids, ok := s.sentWantBlocks[p]
 	if !ok {
-		cids = make(map[cid.Cid]struct{}, len(ks))
+		cids = make(map[wl.WantKey]struct{}, len(ks))
 		s.sentWantBlocks[p] = cids
 	}
 	for _, c := range ks {
@@ -27,7 +27,7 @@ func (s *sentWantBlocksTracker) addSentWantBlocksTo(p peer.ID, ks []cid.Cid) {
 	}
 }
 
-func (s *sentWantBlocksTracker) haveSentWantBlockTo(p peer.ID, c cid.Cid) bool {
+func (s *sentWantBlocksTracker) haveSentWantBlockTo(p peer.ID, c wl.WantKey) bool {
 	_, ok := s.sentWantBlocks[p][c]
 	return ok
 }

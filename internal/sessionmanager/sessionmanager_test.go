@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	bsmsg "github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -22,9 +24,9 @@ import (
 )
 
 type fakeSession struct {
-	ks         []cid.Cid
-	wantBlocks []cid.Cid
-	wantHaves  []cid.Cid
+	ks         []wl.WantKey
+	wantBlocks []wl.WantKey
+	wantHaves  []wl.WantKey
 	id         uint64
 	pm         *fakeSesPeerManager
 	sm         bssession.SessionManager
@@ -48,7 +50,7 @@ func (*fakeSession) GetBlocksFromChannel(context.Context, exchange.Channel, []ci
 func (fs *fakeSession) ID() uint64 {
 	return fs.id
 }
-func (fs *fakeSession) ReceiveFrom(p peer.ID, ks []cid.Cid, wantBlocks []cid.Cid, wantHaves []cid.Cid) {
+func (fs *fakeSession) ReceiveFrom(p peer.ID, ks []wl.WantKey, wantBlocks []wl.WantKey, wantHaves []wl.WantKey) {
 	fs.ks = append(fs.ks, ks...)
 	fs.wantBlocks = append(fs.wantBlocks, wantBlocks...)
 	fs.wantHaves = append(fs.wantHaves, wantHaves...)
@@ -70,19 +72,19 @@ func (*fakeSesPeerManager) ProtectConnection(peer.ID) {}
 
 type fakePeerManager struct {
 	lk      sync.Mutex
-	cancels []cid.Cid
+	cancels []wl.WantKey
 }
 
-func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                    {}
-func (*fakePeerManager) UnregisterSession(uint64)                                 {}
-func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid) {}
-func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid)            {}
-func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {
+func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                          {}
+func (*fakePeerManager) UnregisterSession(uint64)                                       {}
+func (*fakePeerManager) SendWants(context.Context, peer.ID, []wl.WantKey, []wl.WantKey) {}
+func (*fakePeerManager) BroadcastWantHaves(context.Context, []wl.WantKey)               {}
+func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []wl.WantKey) {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()
 	fpm.cancels = append(fpm.cancels, cancels...)
 }
-func (fpm *fakePeerManager) cancelled() []cid.Cid {
+func (fpm *fakePeerManager) cancelled() []wl.WantKey {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()
 	return fpm.cancels
@@ -98,7 +100,8 @@ func sessionFactory(ctx context.Context,
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session {
+	self peer.ID,
+) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -128,30 +131,29 @@ func TestReceiveFrom(t *testing.T) {
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
 
 	p := peer.ID(fmt.Sprint(123))
-	block := blocks.NewBlock([]byte("block"))
-
+	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 
-	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
+	sim.RecordSessionInterest(firstSession.ID(), []wl.WantKey{block.GetKey()})
+	sim.RecordSessionInterest(thirdSession.ID(), []wl.WantKey{block.GetKey()})
 
-	sm.ReceiveFrom(ctx, p, []cid.Cid{block.Cid()}, []cid.Cid{}, []cid.Cid{})
+	sm.ReceiveFrom(ctx, p, []wl.WantKey{block.GetKey()}, nil, nil)
 	if len(firstSession.ks) == 0 ||
 		len(secondSession.ks) > 0 ||
 		len(thirdSession.ks) == 0 {
 		t.Fatal("should have received blocks but didn't")
 	}
 
-	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{block.Cid()}, []cid.Cid{})
+	sm.ReceiveFrom(ctx, p, nil, []wl.WantKey{block.GetKey()}, nil)
 	if len(firstSession.wantBlocks) == 0 ||
 		len(secondSession.wantBlocks) > 0 ||
 		len(thirdSession.wantBlocks) == 0 {
 		t.Fatal("should have received want-blocks but didn't")
 	}
 
-	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{}, []cid.Cid{block.Cid()})
+	sm.ReceiveFrom(ctx, p, nil, nil, []wl.WantKey{block.GetKey()})
 	if len(firstSession.wantHaves) == 0 ||
 		len(secondSession.wantHaves) > 0 ||
 		len(thirdSession.wantHaves) == 0 {
@@ -175,22 +177,23 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
 
 	p := peer.ID(fmt.Sprint(123))
-	block := blocks.NewBlock([]byte("block"))
+	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 
 	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	keys := []wl.WantKey{block.GetKey()}
 
-	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(secondSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
+	sim.RecordSessionInterest(firstSession.ID(), keys)
+	sim.RecordSessionInterest(secondSession.ID(), keys)
+	sim.RecordSessionInterest(thirdSession.ID(), keys)
 
 	sm.Shutdown()
 
 	// wait for sessions to get removed
 	time.Sleep(10 * time.Millisecond)
 
-	sm.ReceiveFrom(ctx, p, []cid.Cid{block.Cid()}, []cid.Cid{}, []cid.Cid{})
+	sm.ReceiveFrom(ctx, p, keys, nil, nil)
 	if len(firstSession.ks) > 0 ||
 		len(secondSession.ks) > 0 ||
 		len(thirdSession.ks) > 0 {
@@ -209,23 +212,24 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
 
 	p := peer.ID(fmt.Sprint(123))
-	block := blocks.NewBlock([]byte("block"))
+	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
 
 	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 	secondSession := sm.NewSession(sessionCtx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
 
-	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(secondSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
+	keys := []wl.WantKey{block.GetKey()}
+	sim.RecordSessionInterest(firstSession.ID(), keys)
+	sim.RecordSessionInterest(secondSession.ID(), keys)
+	sim.RecordSessionInterest(thirdSession.ID(), keys)
 
 	sessionCancel()
 
 	// wait for sessions to get removed
 	time.Sleep(10 * time.Millisecond)
 
-	sm.ReceiveFrom(ctx, p, []cid.Cid{block.Cid()}, []cid.Cid{}, []cid.Cid{})
+	sm.ReceiveFrom(ctx, p, keys, nil, nil)
 	if len(firstSession.ks) == 0 ||
 		len(secondSession.ks) > 0 ||
 		len(thirdSession.ks) == 0 {
@@ -245,13 +249,13 @@ func TestShutdown(t *testing.T) {
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
 
 	p := peer.ID(fmt.Sprint(123))
-	block := blocks.NewBlock([]byte("block"))
-	cids := []cid.Cid{block.Cid()}
+	block := bsmsg.NewMsgBlock(blocks.NewBlock([]byte("block")), "")
+	keys := []wl.WantKey{block.GetKey()}
 	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	sim.RecordSessionInterest(firstSession.ID(), cids)
-	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{}, cids)
+	sim.RecordSessionInterest(firstSession.ID(), keys)
+	sm.ReceiveFrom(ctx, p, nil, nil, keys)
 
-	if !bpm.HasKey(block.Cid()) {
+	if !bpm.HasKey(block.GetKey()) {
 		t.Fatal("expected cid to be added to block presence manager")
 	}
 
@@ -260,10 +264,10 @@ func TestShutdown(t *testing.T) {
 	// wait for cleanup
 	time.Sleep(10 * time.Millisecond)
 
-	if bpm.HasKey(block.Cid()) {
+	if bpm.HasKey(block.GetKey()) {
 		t.Fatal("expected cid to be removed from block presence manager")
 	}
-	if !testutil.MatchKeysIgnoreOrder(pm.cancelled(), cids) {
+	if !testutil.MatchKeysIgnoreOrder(pm.cancelled(), keys) {
 		t.Fatal("expected cancels to be sent")
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ipfs/go-cid"
+	wl "github.com/daotl/go-bitswap/wantlist"
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/daotl/go-bitswap/internal/testutil"
@@ -21,7 +21,7 @@ func TestBlockPresenceManager(t *testing.T) {
 	bpm := New()
 
 	p := testutil.GeneratePeers(1)[0]
-	cids := testutil.GenerateCids(2)
+	cids := testutil.GenerateWantKeys(2)
 	c0 := cids[0]
 	c1 := cids[1]
 
@@ -35,7 +35,7 @@ func TestBlockPresenceManager(t *testing.T) {
 	}
 
 	// HAVE cid0 / DONT_HAVE cid1
-	bpm.ReceiveFrom(p, []cid.Cid{c0}, []cid.Cid{c1})
+	bpm.ReceiveFrom(p, []wl.WantKey{c0}, []wl.WantKey{c1})
 
 	// Peer has received HAVE for cid0
 	if !bpm.PeerHasBlock(p, c0) {
@@ -54,7 +54,7 @@ func TestBlockPresenceManager(t *testing.T) {
 	}
 
 	// HAVE cid1 / DONT_HAVE cid0
-	bpm.ReceiveFrom(p, []cid.Cid{c1}, []cid.Cid{c0})
+	bpm.ReceiveFrom(p, []wl.WantKey{c1}, []wl.WantKey{c0})
 
 	// DONT_HAVE cid0 should NOT over-write earlier HAVE cid0
 	if bpm.PeerDoesNotHaveBlock(p, c0) {
@@ -73,7 +73,7 @@ func TestBlockPresenceManager(t *testing.T) {
 	}
 
 	// Remove cid0
-	bpm.RemoveKeys([]cid.Cid{c0})
+	bpm.RemoveKeys([]wl.WantKey{c0})
 
 	// Nothing stored, both PeerHasBlock and PeerDoesNotHaveBlock should
 	// return false
@@ -85,7 +85,7 @@ func TestBlockPresenceManager(t *testing.T) {
 	}
 
 	// Remove cid1
-	bpm.RemoveKeys([]cid.Cid{c1})
+	bpm.RemoveKeys([]wl.WantKey{c1})
 
 	// Nothing stored, both PeerHasBlock and PeerDoesNotHaveBlock should
 	// return false
@@ -103,15 +103,15 @@ func TestAddRemoveMulti(t *testing.T) {
 	peers := testutil.GeneratePeers(2)
 	p0 := peers[0]
 	p1 := peers[1]
-	cids := testutil.GenerateCids(3)
+	cids := testutil.GenerateWantKeys(3)
 	c0 := cids[0]
 	c1 := cids[1]
 	c2 := cids[2]
 
 	// p0: HAVE cid0, cid1 / DONT_HAVE cid1, cid2
 	// p1: HAVE cid1, cid2 / DONT_HAVE cid0
-	bpm.ReceiveFrom(p0, []cid.Cid{c0, c1}, []cid.Cid{c1, c2})
-	bpm.ReceiveFrom(p1, []cid.Cid{c1, c2}, []cid.Cid{c0})
+	bpm.ReceiveFrom(p0, []wl.WantKey{c0, c1}, []wl.WantKey{c1, c2})
+	bpm.ReceiveFrom(p1, []wl.WantKey{c1, c2}, []wl.WantKey{c0})
 
 	// Peer 0 should end up with
 	// - HAVE cid0
@@ -144,7 +144,7 @@ func TestAddRemoveMulti(t *testing.T) {
 	// Remove cid1 and cid2. Should end up with
 	// Peer 0: HAVE cid0
 	// Peer 1: DONT_HAVE cid0
-	bpm.RemoveKeys([]cid.Cid{c1, c2})
+	bpm.RemoveKeys([]wl.WantKey{c1, c2})
 	if !bpm.PeerHasBlock(p0, c0) {
 		t.Fatal(expHasTrueMsg)
 	}
@@ -188,7 +188,7 @@ func TestAllPeersDoNotHaveBlock(t *testing.T) {
 	p1 := peers[1]
 	p2 := peers[2]
 
-	cids := testutil.GenerateCids(3)
+	cids := testutil.GenerateWantKeys(3)
 	c0 := cids[0]
 	c1 := cids[1]
 	c2 := cids[2]
@@ -197,35 +197,35 @@ func TestAllPeersDoNotHaveBlock(t *testing.T) {
 	//  p0   ?  N   N
 	//  p1   N  Y   ?
 	//  p2   Y  Y   N
-	bpm.ReceiveFrom(p0, []cid.Cid{}, []cid.Cid{c1, c2})
-	bpm.ReceiveFrom(p1, []cid.Cid{c1}, []cid.Cid{c0})
-	bpm.ReceiveFrom(p2, []cid.Cid{c0, c1}, []cid.Cid{c2})
+	bpm.ReceiveFrom(p0, []wl.WantKey{}, []wl.WantKey{c1, c2})
+	bpm.ReceiveFrom(p1, []wl.WantKey{c1}, []wl.WantKey{c0})
+	bpm.ReceiveFrom(p2, []wl.WantKey{c0, c1}, []wl.WantKey{c2})
 
 	type testcase struct {
 		peers []peer.ID
-		ks    []cid.Cid
-		exp   []cid.Cid
+		ks    []wl.WantKey
+		exp   []wl.WantKey
 	}
 
 	testcases := []testcase{
-		testcase{[]peer.ID{p0}, []cid.Cid{c0}, []cid.Cid{}},
-		testcase{[]peer.ID{p1}, []cid.Cid{c0}, []cid.Cid{c0}},
-		testcase{[]peer.ID{p2}, []cid.Cid{c0}, []cid.Cid{}},
+		testcase{[]peer.ID{p0}, []wl.WantKey{c0}, []wl.WantKey{}},
+		testcase{[]peer.ID{p1}, []wl.WantKey{c0}, []wl.WantKey{c0}},
+		testcase{[]peer.ID{p2}, []wl.WantKey{c0}, []wl.WantKey{}},
 
-		testcase{[]peer.ID{p0}, []cid.Cid{c1}, []cid.Cid{c1}},
-		testcase{[]peer.ID{p1}, []cid.Cid{c1}, []cid.Cid{}},
-		testcase{[]peer.ID{p2}, []cid.Cid{c1}, []cid.Cid{}},
+		testcase{[]peer.ID{p0}, []wl.WantKey{c1}, []wl.WantKey{c1}},
+		testcase{[]peer.ID{p1}, []wl.WantKey{c1}, []wl.WantKey{}},
+		testcase{[]peer.ID{p2}, []wl.WantKey{c1}, []wl.WantKey{}},
 
-		testcase{[]peer.ID{p0}, []cid.Cid{c2}, []cid.Cid{c2}},
-		testcase{[]peer.ID{p1}, []cid.Cid{c2}, []cid.Cid{}},
-		testcase{[]peer.ID{p2}, []cid.Cid{c2}, []cid.Cid{c2}},
+		testcase{[]peer.ID{p0}, []wl.WantKey{c2}, []wl.WantKey{c2}},
+		testcase{[]peer.ID{p1}, []wl.WantKey{c2}, []wl.WantKey{}},
+		testcase{[]peer.ID{p2}, []wl.WantKey{c2}, []wl.WantKey{c2}},
 
 		// p0 recieved DONT_HAVE for c1 & c2 (but not for c0)
-		testcase{[]peer.ID{p0}, []cid.Cid{c0, c1, c2}, []cid.Cid{c1, c2}},
-		testcase{[]peer.ID{p0, p1}, []cid.Cid{c0, c1, c2}, []cid.Cid{}},
+		testcase{[]peer.ID{p0}, []wl.WantKey{c0, c1, c2}, []wl.WantKey{c1, c2}},
+		testcase{[]peer.ID{p0, p1}, []wl.WantKey{c0, c1, c2}, []wl.WantKey{}},
 		// Both p0 and p2 received DONT_HAVE for c2
-		testcase{[]peer.ID{p0, p2}, []cid.Cid{c0, c1, c2}, []cid.Cid{c2}},
-		testcase{[]peer.ID{p0, p1, p2}, []cid.Cid{c0, c1, c2}, []cid.Cid{}},
+		testcase{[]peer.ID{p0, p2}, []wl.WantKey{c0, c1, c2}, []wl.WantKey{c2}},
+		testcase{[]peer.ID{p0, p1, p2}, []wl.WantKey{c0, c1, c2}, []wl.WantKey{}},
 	}
 
 	for i, tc := range testcases {

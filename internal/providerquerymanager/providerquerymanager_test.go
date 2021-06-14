@@ -69,7 +69,7 @@ func TestNormalSimultaneousFetch(t *testing.T) {
 	providerQueryManager.Startup()
 	keys := testutil.GenerateCids(2)
 
-	sessionCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	sessionCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 	defer cancel()
 	firstRequestChan := providerQueryManager.FindProvidersAsync(sessionCtx, keys[0])
 	secondRequestChan := providerQueryManager.FindProvidersAsync(sessionCtx, keys[1])
@@ -83,7 +83,7 @@ func TestNormalSimultaneousFetch(t *testing.T) {
 	for p := range secondRequestChan {
 		secondPeersReceived = append(secondPeersReceived, p)
 	}
-
+	println(len(firstPeersReceived), len(peers), len(secondPeersReceived))
 	if len(firstPeersReceived) != len(peers) || len(secondPeersReceived) != len(peers) {
 		t.Fatal("Did not collect all peers for request that was completed")
 	}

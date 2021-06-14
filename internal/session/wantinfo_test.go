@@ -19,16 +19,19 @@ func TestSetPeerBlockPresence(t *testing.T) {
 	wp := newWantInfo(newPeerResponseTracker())
 
 	wp.setPeerBlockPresence(peers[0], BPUnknown)
+	wp.calculateBestPeer()
 	if wp.bestPeer != peers[0] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[1], BPHave)
+	wp.calculateBestPeer()
 	if wp.bestPeer != peers[1] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[0], BPDontHave)
+	wp.calculateBestPeer()
 	if wp.bestPeer != peers[1] {
 		t.Fatal("wrong best peer")
 	}
@@ -39,16 +42,20 @@ func TestSetPeerBlockPresenceBestLower(t *testing.T) {
 	wp := newWantInfo(newPeerResponseTracker())
 
 	wp.setPeerBlockPresence(peers[0], BPHave)
+	wp.calculateBestPeer()
 	if wp.bestPeer != peers[0] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[1], BPUnknown)
+	wp.calculateBestPeer()
+
 	if wp.bestPeer != peers[0] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[0], BPDontHave)
+	wp.calculateBestPeer()
 	if wp.bestPeer != peers[1] {
 		t.Fatal("wrong best peer")
 	}
@@ -59,21 +66,29 @@ func TestRemoveThenSetDontHave(t *testing.T) {
 	wp := newWantInfo(newPeerResponseTracker())
 
 	wp.setPeerBlockPresence(peers[0], BPUnknown)
+	wp.calculateBestPeer()
+
 	if wp.bestPeer != peers[0] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.removePeer(peers[0])
+	wp.calculateBestPeer()
+
 	if wp.bestPeer != "" {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[1], BPUnknown)
+	wp.calculateBestPeer()
+
 	if wp.bestPeer != peers[1] {
 		t.Fatal("wrong best peer")
 	}
 
 	wp.setPeerBlockPresence(peers[0], BPDontHave)
+	wp.calculateBestPeer()
+
 	if wp.bestPeer != peers[1] {
 		t.Fatal("wrong best peer")
 	}

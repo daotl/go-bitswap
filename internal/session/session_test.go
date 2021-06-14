@@ -2,10 +2,15 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
+	bsmsg "github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	"github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	delay "github.com/ipfs/go-ipfs-delay"
@@ -22,7 +27,7 @@ import (
 type mockSessionMgr struct {
 	lk            sync.Mutex
 	removeSession bool
-	cancels       []cid.Cid
+	cancels       []wl.WantKey
 }
 
 func newMockSessionMgr() *mockSessionMgr {
@@ -35,7 +40,7 @@ func (msm *mockSessionMgr) removeSessionCalled() bool {
 	return msm.removeSession
 }
 
-func (msm *mockSessionMgr) cancelled() []cid.Cid {
+func (msm *mockSessionMgr) cancelled() []wl.WantKey {
 	msm.lk.Lock()
 	defer msm.lk.Unlock()
 	return msm.cancels
@@ -47,7 +52,7 @@ func (msm *mockSessionMgr) RemoveSession(sesid uint64) {
 	msm.removeSession = true
 }
 
-func (msm *mockSessionMgr) CancelSessionWants(sid uint64, wants []cid.Cid) {
+func (msm *mockSessionMgr) CancelSessionWants(sid uint64, wants []wl.WantKey) {
 	msm.lk.Lock()
 	defer msm.lk.Unlock()
 	msm.cancels = append(msm.cancels, wants...)
@@ -124,7 +129,7 @@ func (fpf *fakeProviderFinder) FindProvidersAsync(ctx context.Context, k cid.Cid
 }
 
 type wantReq struct {
-	cids []cid.Cid
+	cids []wl.WantKey
 }
 
 type fakePeerManager struct {
@@ -137,16 +142,16 @@ func newFakePeerManager() *fakePeerManager {
 	}
 }
 
-func (pm *fakePeerManager) RegisterSession(peer.ID, bspm.Session)                    {}
-func (pm *fakePeerManager) UnregisterSession(uint64)                                 {}
-func (pm *fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid) {}
-func (pm *fakePeerManager) BroadcastWantHaves(ctx context.Context, cids []cid.Cid) {
+func (pm *fakePeerManager) RegisterSession(peer.ID, bspm.Session)                          {}
+func (pm *fakePeerManager) UnregisterSession(uint64)                                       {}
+func (pm *fakePeerManager) SendWants(context.Context, peer.ID, []wl.WantKey, []wl.WantKey) {}
+func (pm *fakePeerManager) BroadcastWantHaves(ctx context.Context, cids []wl.WantKey) {
 	select {
 	case pm.wantReqs <- wantReq{cids}:
 	case <-ctx.Done():
 	}
 }
-func (pm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {}
+func (pm *fakePeerManager) SendCancels(ctx context.Context, cancels []wl.WantKey) {}
 
 func TestSessionGetBlocks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -161,7 +166,8 @@ func TestSessionGetBlocks(t *testing.T) {
 	sm := newMockSessionMgr()
 	session := New(ctx, sm, id, fspm, fpf, sim, fpm, bpm, notif, time.Second, delay.Fixed(time.Minute), "")
 	blockGenerator := blocksutil.NewBlockGenerator()
-	blks := blockGenerator.Blocks(broadcastLiveWantsLimit * 2)
+	ipldBlks := blockGenerator.Blocks(broadcastLiveWantsLimit * 2)
+	blks := bsmsg.BlocksToMsgBlocks(ipldBlks, "")
 	var cids []cid.Cid
 	for _, block := range blks {
 		cids = append(cids, block.Cid())
@@ -176,9 +182,10 @@ func TestSessionGetBlocks(t *testing.T) {
 	// Wait for initial want request
 	receivedWantReq := <-fpm.wantReqs
 
+	keys := wl.CidsToKeys(cids, "")
 	// Should have registered session's interest in blocks
-	intSes := sim.FilterSessionInterested(id, cids)
-	if !testutil.MatchKeysIgnoreOrder(intSes[0], cids) {
+	intSes := sim.FilterSessionInterested(id, keys)
+	if !testutil.MatchKeysIgnoreOrder(intSes[0], keys) {
 		t.Fatal("did not register session interest in blocks")
 	}
 
@@ -190,8 +197,8 @@ func TestSessionGetBlocks(t *testing.T) {
 	// Simulate receiving HAVEs from several peers
 	peers := testutil.GeneratePeers(5)
 	for i, p := range peers {
-		blk := blks[testutil.IndexOf(blks, receivedWantReq.cids[i])]
-		session.ReceiveFrom(p, []cid.Cid{}, []cid.Cid{blk.Cid()}, []cid.Cid{})
+		blk := blks[testutil.IndexOf(ipldBlks, receivedWantReq.cids[i].Cid)]
+		session.ReceiveFrom(p, nil, []wl.WantKey{blk.GetKey()}, nil)
 	}
 
 	time.Sleep(10 * time.Millisecond)
@@ -208,7 +215,7 @@ func TestSessionGetBlocks(t *testing.T) {
 	}
 
 	// Simulate receiving DONT_HAVE for a CID
-	session.ReceiveFrom(peers[0], []cid.Cid{}, []cid.Cid{}, []cid.Cid{blks[0].Cid()})
+	session.ReceiveFrom(peers[0], nil, nil, []wl.WantKey{blks[0].GetKey()})
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -219,7 +226,7 @@ func TestSessionGetBlocks(t *testing.T) {
 	}
 
 	// Simulate receiving block for a CID
-	session.ReceiveFrom(peers[1], []cid.Cid{blks[0].Cid()}, []cid.Cid{}, []cid.Cid{})
+	session.ReceiveFrom(peers[1], []wl.WantKey{blks[0].GetKey()}, nil, nil)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -240,6 +247,39 @@ func TestSessionGetBlocks(t *testing.T) {
 	// Verify session was removed
 	if !sm.removeSessionCalled() {
 		t.Fatal("expected session to be removed")
+	}
+}
+
+func TestSessionGetBlocksBlocked(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	fpm := newFakePeerManager()
+	fspm := newFakeSessionPeerManager()
+	fpf := newFakeProviderFinder()
+	sim := bssim.New()
+	bpm := bsbpm.New()
+	notif := notifications.New()
+	defer notif.Shutdown()
+	id := testutil.GenerateSessionID()
+	sm := newMockSessionMgr()
+	session := New(ctx, sm, id, fspm, fpf, sim, fpm, bpm, notif, time.Second, delay.Fixed(time.Minute), "")
+	cids := testutil.GenerateCids(4)
+	set := cid.NewSet()
+	for _, c := range cids {
+		set.Add(c)
+	}
+	ac.GlobalFilter = func(pid peer.ID, channel exchange.Channel, id cid.Cid) (bool, error) {
+		if set.Has(id) {
+			return false, fmt.Errorf("%v is blocked", id.String())
+		} else {
+			return true, nil
+		}
+	}
+	defer ac.ResetFilter()
+	_, err := session.GetBlocks(ctx, cids)
+
+	if err == nil {
+		t.Fatal("getblocks should be blocked")
 	}
 }
 
@@ -282,7 +322,7 @@ func TestSessionFindMorePeers(t *testing.T) {
 	p := testutil.GeneratePeers(1)[0]
 
 	blk := blks[0]
-	session.ReceiveFrom(p, []cid.Cid{blk.Cid()}, []cid.Cid{}, []cid.Cid{})
+	session.ReceiveFrom(p, []wl.WantKey{wl.NewWantKey(blk.Cid(), "")}, nil, nil)
 
 	// The session should now time out waiting for a response and broadcast
 	// want-haves again
@@ -301,7 +341,7 @@ func TestSessionFindMorePeers(t *testing.T) {
 		// Make sure the first block is not included because it has already
 		// been received
 		for _, c := range receivedWantReq.cids {
-			if c.Equals(cids[0]) {
+			if c.Cid.Equals(cids[0]) {
 				t.Fatal("should not braodcast block that was already received")
 			}
 		}
@@ -352,7 +392,7 @@ func TestSessionOnPeersExhausted(t *testing.T) {
 	}
 
 	// Signal that all peers have send DONT_HAVE for two of the wants
-	session.onPeersExhausted(cids[len(cids)-2:])
+	session.onPeersExhausted(wl.CidsToKeys(cids[len(cids)-2:], ""))
 
 	// Wait for want request
 	receivedWantReq = <-fpm.wantReqs
@@ -585,7 +625,7 @@ func TestSessionReceiveMessageAfterCtxCancel(t *testing.T) {
 
 	// Simulate receiving block for a CID
 	peer := testutil.GeneratePeers(1)[0]
-	session.ReceiveFrom(peer, []cid.Cid{blks[0].Cid()}, []cid.Cid{}, []cid.Cid{})
+	session.ReceiveFrom(peer, []wl.WantKey{wl.NewWantKey(blks[0].Cid(), "")}, nil, nil)
 
 	time.Sleep(5 * time.Millisecond)
 

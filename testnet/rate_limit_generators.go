@@ -8,7 +8,7 @@ type fixedRateLimitGenerator struct {
 	rateLimit float64
 }
 
-// FixedRateLimitGenerator returns a rate limit generatoe that always generates
+// FixedRateLimitGenerator returns a rate limit generator that always generates
 // the specified rate limit in bytes/sec.
 func FixedRateLimitGenerator(rateLimit float64) RateLimitGenerator {
 	return &fixedRateLimitGenerator{rateLimit}

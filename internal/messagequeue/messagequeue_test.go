@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	ac "github.com/daotl/go-bitswap/accesscontrol"
+	bswl "github.com/daotl/go-bitswap/wantlist"
+	exchange "github.com/daotl/go-ipfs-exchange-interface"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -45,27 +48,28 @@ func (fms *fakeMessageNetwork) Ping(context.Context, peer.ID) ping.Result {
 
 type fakeDontHaveTimeoutMgr struct {
 	lk          sync.Mutex
-	ks          []cid.Cid
+	ks          []bswl.WantKey
 	latencyUpds []time.Duration
 }
 
 func (fp *fakeDontHaveTimeoutMgr) Start()    {}
 func (fp *fakeDontHaveTimeoutMgr) Shutdown() {}
-func (fp *fakeDontHaveTimeoutMgr) AddPending(ks []cid.Cid) {
+func (fp *fakeDontHaveTimeoutMgr) AddPending(ks []bswl.WantKey) {
 	fp.lk.Lock()
 	defer fp.lk.Unlock()
 
-	s := cid.NewSet()
+	s := bswl.NewSet()
 	for _, c := range append(fp.ks, ks...) {
 		s.Add(c)
 	}
 	fp.ks = s.Keys()
 }
-func (fp *fakeDontHaveTimeoutMgr) CancelPending(ks []cid.Cid) {
+
+func (fp *fakeDontHaveTimeoutMgr) CancelPending(ks []bswl.WantKey) {
 	fp.lk.Lock()
 	defer fp.lk.Unlock()
 
-	s := cid.NewSet()
+	s := bswl.NewSet()
 	for _, c := range fp.ks {
 		s.Add(c)
 	}
@@ -121,7 +125,7 @@ func (fms *fakeMessageSender) Close() error       { return nil }
 func (fms *fakeMessageSender) Reset() error       { fms.reset <- struct{}{}; return nil }
 func (fms *fakeMessageSender) SupportsHave() bool { return fms.supportsHave }
 
-func mockTimeoutCb(peer.ID, []cid.Cid) {}
+func mockTimeoutCb(peer.ID, []bswl.WantKey) {}
 
 func collectMessages(ctx context.Context,
 	t *testing.T,
@@ -156,7 +160,7 @@ func TestStartupAndShutdown(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
-	bcstwh := testutil.GenerateCids(10)
+	bcstwh := testutil.GenerateWantKeys(10)
 
 	messageQueue.Startup()
 	messageQueue.AddBroadcastWantHaves(bcstwh)
@@ -194,16 +198,41 @@ func TestSendingMessagesDeduped(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
-	wantHaves := testutil.GenerateCids(10)
-	wantBlocks := testutil.GenerateCids(10)
+	wantHaves := testutil.GenerateWantKeys(10)
+	wantBlocks := testutil.GenerateWantKeys(10)
 
 	messageQueue.Startup()
 	messageQueue.AddWants(wantBlocks, wantHaves)
 	messageQueue.AddWants(wantBlocks, wantHaves)
-	messages := collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
-
+	messages := collectMessages(ctx, t, messagesSent, 20*time.Millisecond)
 	if totalEntriesLength(messages) != len(wantHaves)+len(wantBlocks) {
 		t.Fatal("Messages were not deduped")
+	}
+}
+
+func TestBroadcastBlocked(t *testing.T) {
+	ctx := context.Background()
+	messagesSent := make(chan []bsmsg.Entry)
+	resetChan := make(chan struct{}, 1)
+	fakeSender := newFakeMessageSender(resetChan, messagesSent, true)
+	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
+	peerID := testutil.GeneratePeers(1)[0]
+	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
+	wantHaves := testutil.GenerateWantKeys(10)
+	set := bswl.NewSetFromKeys(wantHaves)
+	ac.GlobalFilter = func(pid peer.ID, channel exchange.Channel, id cid.Cid) (bool, error) {
+		if set.Has(bswl.NewWantKey(id, channel)) {
+			return false, fmt.Errorf("%v is blocked", id.String())
+		} else {
+			return true, nil
+		}
+	}
+	defer ac.ResetFilter()
+	messageQueue.Startup()
+	messageQueue.AddBroadcastWantHaves(wantHaves)
+	messages := collectMessages(ctx, t, messagesSent, 20*time.Millisecond)
+	if totalEntriesLength(messages) != 0 {
+		t.Fatal("broadcast were not blocked")
 	}
 }
 
@@ -215,8 +244,8 @@ func TestSendingMessagesPartialDupe(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
-	wantHaves := testutil.GenerateCids(10)
-	wantBlocks := testutil.GenerateCids(10)
+	wantHaves := testutil.GenerateWantKeys(10)
+	wantBlocks := testutil.GenerateWantKeys(10)
 
 	messageQueue.Startup()
 	messageQueue.AddWants(wantBlocks[:8], wantHaves[:8])
@@ -236,11 +265,11 @@ func TestSendingMessagesPriority(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
-	wantHaves1 := testutil.GenerateCids(5)
-	wantHaves2 := testutil.GenerateCids(5)
+	wantHaves1 := testutil.GenerateWantKeys(5)
+	wantHaves2 := testutil.GenerateWantKeys(5)
 	wantHaves := append(wantHaves1, wantHaves2...)
-	wantBlocks1 := testutil.GenerateCids(5)
-	wantBlocks2 := testutil.GenerateCids(5)
+	wantBlocks1 := testutil.GenerateWantKeys(5)
+	wantBlocks2 := testutil.GenerateWantKeys(5)
 	wantBlocks := append(wantBlocks1, wantBlocks2...)
 
 	messageQueue.Startup()
@@ -251,9 +280,9 @@ func TestSendingMessagesPriority(t *testing.T) {
 	if totalEntriesLength(messages) != len(wantHaves)+len(wantBlocks) {
 		t.Fatal("wrong number of wants")
 	}
-	byCid := make(map[cid.Cid]message.Entry)
+	byCid := make(map[bswl.WantKey]message.Entry)
 	for _, entry := range messages[0] {
-		byCid[entry.Cid] = entry
+		byCid[entry.Key] = entry
 	}
 
 	// Check that earliest want-haves have highest priority
@@ -304,9 +333,9 @@ func TestCancelOverridesPendingWants(t *testing.T) {
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
 
-	wantHaves := testutil.GenerateCids(2)
-	wantBlocks := testutil.GenerateCids(2)
-	cancels := []cid.Cid{wantBlocks[0], wantHaves[0]}
+	wantHaves := testutil.GenerateWantKeys(2)
+	wantBlocks := testutil.GenerateWantKeys(2)
+	cancels := []bswl.WantKey{wantBlocks[0], wantHaves[0]}
 
 	messageQueue.Startup()
 	messageQueue.AddWants(wantBlocks, wantHaves)
@@ -354,7 +383,7 @@ func TestWantOverridesPendingCancels(t *testing.T) {
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
 
-	cids := testutil.GenerateCids(3)
+	cids := testutil.GenerateWantKeys(3)
 	wantBlocks := cids[:1]
 	wantHaves := cids[1:]
 
@@ -371,7 +400,7 @@ func TestWantOverridesPendingCancels(t *testing.T) {
 	// Cancel existing wants
 	messageQueue.AddCancels(cids)
 	// Override one cancel with a want-block (before cancel is sent to network)
-	messageQueue.AddWants(cids[:1], []cid.Cid{})
+	messageQueue.AddWants(cids[:1], []bswl.WantKey{})
 
 	messages = collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 	if totalEntriesLength(messages) != 3 {
@@ -399,9 +428,9 @@ func TestWantlistRebroadcast(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb)
-	bcstwh := testutil.GenerateCids(10)
-	wantHaves := testutil.GenerateCids(10)
-	wantBlocks := testutil.GenerateCids(10)
+	bcstwh := testutil.GenerateWantKeys(10)
+	wantHaves := testutil.GenerateWantKeys(10)
+	wantBlocks := testutil.GenerateWantKeys(10)
 
 	// Add some broadcast want-haves
 	messageQueue.Startup()
@@ -459,7 +488,7 @@ func TestWantlistRebroadcast(t *testing.T) {
 
 	// Cancel some of the wants
 	messageQueue.SetRebroadcastInterval(1 * time.Second)
-	cancels := append([]cid.Cid{bcstwh[0]}, wantHaves[0], wantBlocks[0])
+	cancels := append([]bswl.WantKey{bcstwh[0]}, wantHaves[0], wantBlocks[0])
 	messageQueue.AddCancels(cancels)
 	messages = collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 	if len(messages) != 1 {
@@ -495,13 +524,13 @@ func TestSendingLargeMessages(t *testing.T) {
 	dhtm := &fakeDontHaveTimeoutMgr{}
 	peerID := testutil.GeneratePeers(1)[0]
 
-	wantBlocks := testutil.GenerateCids(10)
+	wantBlocks := testutil.GenerateWantKeys(10)
 	entrySize := 44
 	maxMsgSize := entrySize * 3 // 3 wants
 	messageQueue := newMessageQueue(ctx, peerID, fakenet, maxMsgSize, sendErrorBackoff, maxValidLatency, dhtm)
 
 	messageQueue.Startup()
-	messageQueue.AddWants(wantBlocks, []cid.Cid{})
+	messageQueue.AddWants(wantBlocks, nil)
 	messages := collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 
 	// want-block has size 44, so with maxMsgSize 44 * 3 (3 want-blocks), then if
@@ -532,7 +561,7 @@ func TestSendToPeerThatDoesntSupportHave(t *testing.T) {
 	// - broadcast want-haves should be sent as want-blocks
 
 	// Check broadcast want-haves
-	bcwh := testutil.GenerateCids(10)
+	bcwh := testutil.GenerateWantKeys(10)
 	messageQueue.AddBroadcastWantHaves(bcwh)
 	messages := collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 
@@ -550,8 +579,8 @@ func TestSendToPeerThatDoesntSupportHave(t *testing.T) {
 	}
 
 	// Check regular want-haves and want-blocks
-	wbs := testutil.GenerateCids(10)
-	whs := testutil.GenerateCids(10)
+	wbs := testutil.GenerateWantKeys(10)
+	whs := testutil.GenerateWantKeys(10)
 	messageQueue.AddWants(wbs, whs)
 	messages = collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 
@@ -581,7 +610,7 @@ func TestSendToPeerThatDoesntSupportHaveMonitorsTimeouts(t *testing.T) {
 	messageQueue := newMessageQueue(ctx, peerID, fakenet, maxMessageSize, sendErrorBackoff, maxValidLatency, dhtm)
 	messageQueue.Startup()
 
-	wbs := testutil.GenerateCids(10)
+	wbs := testutil.GenerateWantKeys(10)
 	messageQueue.AddWants(wbs, nil)
 	collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 
@@ -612,7 +641,7 @@ func TestResponseReceived(t *testing.T) {
 	messageQueue := newMessageQueue(ctx, peerID, fakenet, maxMessageSize, sendErrorBackoff, maxValidLatency, dhtm)
 	messageQueue.Startup()
 
-	cids := testutil.GenerateCids(10)
+	cids := testutil.GenerateWantKeys(10)
 
 	// Add some wants and wait 10ms
 	messageQueue.AddWants(cids[:5], nil)
@@ -623,7 +652,7 @@ func TestResponseReceived(t *testing.T) {
 	collectMessages(ctx, t, messagesSent, 10*time.Millisecond)
 
 	// Receive a response for some of the wants from both groups
-	messageQueue.ResponseReceived([]cid.Cid{cids[0], cids[6], cids[9]})
+	messageQueue.ResponseReceived([]bswl.WantKey{cids[0], cids[6], cids[9]})
 
 	// Wait a short time for processing
 	time.Sleep(10 * time.Millisecond)
@@ -652,7 +681,7 @@ func TestResponseReceivedAppliesForFirstResponseOnly(t *testing.T) {
 	messageQueue := newMessageQueue(ctx, peerID, fakenet, maxMessageSize, sendErrorBackoff, maxValidLatency, dhtm)
 	messageQueue.Startup()
 
-	cids := testutil.GenerateCids(2)
+	cids := testutil.GenerateWantKeys(2)
 
 	// Add some wants and wait 10ms
 	messageQueue.AddWants(cids, nil)
@@ -697,7 +726,7 @@ func TestResponseReceivedDiscardsOutliers(t *testing.T) {
 	messageQueue := newMessageQueue(ctx, peerID, fakenet, maxMessageSize, sendErrorBackoff, maxValLatency, dhtm)
 	messageQueue.Startup()
 
-	cids := testutil.GenerateCids(4)
+	cids := testutil.GenerateWantKeys(4)
 
 	// Add some wants and wait 20ms
 	messageQueue.AddWants(cids[:2], nil)
@@ -726,17 +755,17 @@ func TestResponseReceivedDiscardsOutliers(t *testing.T) {
 	}
 }
 
-func filterWantTypes(wantlist []bsmsg.Entry) ([]cid.Cid, []cid.Cid, []cid.Cid) {
-	var wbs []cid.Cid
-	var whs []cid.Cid
-	var cls []cid.Cid
+func filterWantTypes(wantlist []bsmsg.Entry) ([]bswl.WantKey, []bswl.WantKey, []bswl.WantKey) {
+	var wbs []bswl.WantKey
+	var whs []bswl.WantKey
+	var cls []bswl.WantKey
 	for _, e := range wantlist {
 		if e.Cancel {
-			cls = append(cls, e.Cid)
+			cls = append(cls, e.Key)
 		} else if e.WantType == pb.Message_Wantlist_Block {
-			wbs = append(wbs, e.Cid)
+			wbs = append(wbs, e.Key)
 		} else {
-			whs = append(whs, e.Cid)
+			whs = append(whs, e.Key)
 		}
 	}
 	return wbs, whs, cls
@@ -788,10 +817,10 @@ func BenchmarkMessageQueue(b *testing.B) {
 
 		// Alternately add either a few wants or a lot of broadcast wants
 		if rand.Intn(2) == 0 {
-			wants := testutil.GenerateCids(10)
+			wants := testutil.GenerateWantKeys(10)
 			qs[i].AddWants(wants[:2], wants[2:])
 		} else {
-			wants := testutil.GenerateCids(60)
+			wants := testutil.GenerateWantKeys(60)
 			qs[i].AddBroadcastWantHaves(wants)
 		}
 	}

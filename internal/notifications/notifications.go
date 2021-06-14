@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	pubsub "github.com/cskr/pubsub"
-	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
+	"github.com/cskr/pubsub"
+	"github.com/daotl/go-bitswap/message"
+	wl "github.com/daotl/go-bitswap/wantlist"
 )
 
 const bufferSize = 16
@@ -15,8 +15,8 @@ const bufferSize = 16
 // for cids. It's used internally by bitswap to decouple receiving blocks
 // and actually providing them back to the GetBlocks caller.
 type PubSub interface {
-	Publish(block blocks.Block)
-	Subscribe(ctx context.Context, keys ...cid.Cid) <-chan blocks.Block
+	Publish(block message.MsgBlock)
+	Subscribe(ctx context.Context, keys ...wl.WantKey) <-chan message.MsgBlock
 	Shutdown()
 }
 
@@ -35,7 +35,7 @@ type impl struct {
 	closed chan struct{}
 }
 
-func (ps *impl) Publish(block blocks.Block) {
+func (ps *impl) Publish(block message.MsgBlock) {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 	select {
@@ -44,7 +44,7 @@ func (ps *impl) Publish(block blocks.Block) {
 	default:
 	}
 
-	ps.wrapped.Pub(block, block.Cid().KeyString())
+	ps.wrapped.Pub(block, toString(block.GetKey()))
 }
 
 func (ps *impl) Shutdown() {
@@ -62,9 +62,9 @@ func (ps *impl) Shutdown() {
 // Subscribe returns a channel of blocks for the given |keys|. |blockChannel|
 // is closed if the |ctx| times out or is cancelled, or after receiving the blocks
 // corresponding to |keys|.
-func (ps *impl) Subscribe(ctx context.Context, keys ...cid.Cid) <-chan blocks.Block {
+func (ps *impl) Subscribe(ctx context.Context, keys ...wl.WantKey) <-chan message.MsgBlock {
 
-	blocksCh := make(chan blocks.Block, len(keys))
+	blocksCh := make(chan message.MsgBlock, len(keys))
 	valuesCh := make(chan interface{}, len(keys)) // provide our own channel to control buffer, prevent blocking
 	if len(keys) == 0 {
 		close(blocksCh)
@@ -111,7 +111,7 @@ func (ps *impl) Subscribe(ctx context.Context, keys ...cid.Cid) <-chan blocks.Bl
 				if !ok {
 					return
 				}
-				block, ok := val.(blocks.Block)
+				block, ok := val.(message.MsgBlock)
 				if !ok {
 					return
 				}
@@ -128,10 +128,14 @@ func (ps *impl) Subscribe(ctx context.Context, keys ...cid.Cid) <-chan blocks.Bl
 	return blocksCh
 }
 
-func toStrings(keys []cid.Cid) []string {
+func toStrings(keys []wl.WantKey) []string {
 	strs := make([]string, 0, len(keys))
 	for _, key := range keys {
-		strs = append(strs, key.KeyString())
+		strs = append(strs, toString(key))
 	}
 	return strs
+}
+
+func toString(key wl.WantKey) string {
+	return string(key.Ch) + "-" + key.Cid.KeyString()
 }
