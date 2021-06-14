@@ -5,61 +5,26 @@ package wantlist
 import (
 	"sort"
 
-	exchange "github.com/daotl/go-ipfs-exchange-interface"
-	"github.com/ipfs/go-cid"
-
 	pb "github.com/daotl/go-bitswap/message/pb"
+	"github.com/daotl/go-ipld-channel/pair"
 )
-
-type WantKey struct {
-	Cid cid.Cid
-	Ch  exchange.Channel
-}
-
-func NewWantKey(cid cid.Cid, ch exchange.Channel) WantKey {
-	return WantKey{Cid: cid, Ch: ch}
-}
-
-func CidsToKeys(cids []cid.Cid, ch exchange.Channel) []WantKey {
-	keys := make([]WantKey, 0, len(cids))
-	for _, c := range cids {
-		keys = append(keys, NewWantKey(c, ch))
-	}
-	return keys
-}
-
-func KeysToCids(keys []WantKey) []cid.Cid {
-	cids := make([]cid.Cid, 0, len(keys))
-	for _, key := range keys {
-		cids = append(cids, key.Cid)
-	}
-	return cids
-}
 
 // Wantlist is a raw list of wanted blocks and their priorities
 type Wantlist struct {
-	set map[WantKey]Entry
+	set map[pair.CidChannelPair]Entry
 }
 
-// Entry is an entry in a want list, consisting of a cid and its priority
+// Entry is an entry in a want list, consisting of a CidChannelPair and its priority
 type Entry struct {
-	Key      WantKey
+	Pair     pair.CidChannelPair
 	Priority int32
 	WantType pb.Message_Wantlist_WantType
 }
 
-func (k WantKey) Equals(k1 WantKey) bool {
-	return k == k1
-}
-
-func (k WantKey) Defined() bool {
-	return k != WantKey{}
-}
-
 // NewRefEntry creates a new reference tracked wantlist entry.
-func NewRefEntry(c cid.Cid, p int32, ch exchange.Channel) Entry {
+func NewRefEntry(ccp pair.CidChannelPair, p int32) Entry {
 	return Entry{
-		Key:      WantKey{c, ch},
+		Pair:     ccp,
 		Priority: p,
 		WantType: pb.Message_Wantlist_Block,
 	}
@@ -74,7 +39,7 @@ func (es entrySlice) Less(i, j int) bool { return es[i].Priority > es[j].Priorit
 // New generates a new raw Wantlist
 func New() *Wantlist {
 	return &Wantlist{
-		set: make(map[WantKey]Entry),
+		set: make(map[pair.CidChannelPair]Entry),
 	}
 }
 
@@ -83,17 +48,18 @@ func (w *Wantlist) Len() int {
 	return len(w.set)
 }
 
-// Add adds an entry in a wantlist from CID & Priority, if not already present.
-func (w *Wantlist) Add(c WantKey, priority int32, wantType pb.Message_Wantlist_WantType) bool {
-	e, ok := w.set[c]
+// Add adds an entry in a wantlist from CidChannelPair & Priority, if not already present.
+func (w *Wantlist) Add(pair pair.CidChannelPair, priority int32,
+	wantType pb.Message_Wantlist_WantType) bool {
+	e, ok := w.set[pair]
 
 	// Adding want-have should not override want-block
 	if ok && (e.WantType == pb.Message_Wantlist_Block || wantType == pb.Message_Wantlist_Have) {
 		return false
 	}
 
-	w.set[c] = Entry{
-		Key:      c,
+	w.set[pair] = Entry{
+		Pair:     pair,
 		Priority: priority,
 		WantType: wantType,
 	}
@@ -101,21 +67,21 @@ func (w *Wantlist) Add(c WantKey, priority int32, wantType pb.Message_Wantlist_W
 	return true
 }
 
-// Remove removes the given key from the wantlist.
-func (w *Wantlist) Remove(c WantKey) bool {
-	_, ok := w.set[c]
+// Remove removes the given CidChannelPair from the wantlist.
+func (w *Wantlist) Remove(p pair.CidChannelPair) bool {
+	_, ok := w.set[p]
 	if !ok {
 		return false
 	}
 
-	delete(w.set, c)
+	delete(w.set, p)
 	return true
 }
 
-// Remove removes the given cid from the wantlist, respecting the type:
+// RemoveType removes the given CidChannelPair from the wantlist, respecting the type:
 // Remove with want-have will not remove an existing want-block.
-func (w *Wantlist) RemoveType(c WantKey, wantType pb.Message_Wantlist_WantType) bool {
-	e, ok := w.set[c]
+func (w *Wantlist) RemoveType(p pair.CidChannelPair, wantType pb.Message_Wantlist_WantType) bool {
+	e, ok := w.set[p]
 	if !ok {
 		return false
 	}
@@ -125,14 +91,14 @@ func (w *Wantlist) RemoveType(c WantKey, wantType pb.Message_Wantlist_WantType) 
 		return false
 	}
 
-	delete(w.set, c)
+	delete(w.set, p)
 	return true
 }
 
-// Contains returns the entry, if present, for the given key, plus whether it
-// was present.
-func (w *Wantlist) Contains(c WantKey) (Entry, bool) {
-	e, ok := w.set[c]
+// Contains returns the entry, if present, for the given CidChannelPair, plus whether
+// it was present.
+func (w *Wantlist) Contains(p pair.CidChannelPair) (Entry, bool) {
+	e, ok := w.set[p]
 	return e, ok
 }
 
@@ -148,7 +114,7 @@ func (w *Wantlist) Entries() []Entry {
 // Absorb all the entries in other into this want list
 func (w *Wantlist) Absorb(other *Wantlist) {
 	for _, e := range other.Entries() {
-		w.Add(e.Key, e.Priority, e.WantType)
+		w.Add(e.Pair, e.Priority, e.WantType)
 	}
 }
 

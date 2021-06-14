@@ -38,10 +38,14 @@ github.com/daotl/go-ipfs-blockstore v1.0.3 h1:ZiKgU28rHMkQoa7BX36P7CsZYmAuIRUk4K
 github.com/daotl/go-ipfs-blockstore v1.0.3/go.mod h1:9s9N3VF1/gz1069Y9WcaY9N3DcNQHVhi9hA5hXumHrc=
 github.com/daotl/go-ipfs-ds-help v1.0.1 h1:en7NjpI4gWJ4gS1l/TW1SbW94MnCgZcwyv5JUMvZmv8=
 github.com/daotl/go-ipfs-ds-help v1.0.1/go.mod h1:IEXM2uF9H0ew9rsOuwm973p4AQSgP8/LXt7mWG7Fpww=
-github.com/daotl/go-ipfs-exchange-interface v0.0.2 h1:cD7IF07x6AGn3IhrIdpI3NpUAfVXBdyAr3NrBLQzLXE=
-github.com/daotl/go-ipfs-exchange-interface v0.0.2/go.mod h1:edI3A9RQKuW9cU9fFWDGsSCPZ6YgsUFF12hTUD80tgg=
+github.com/daotl/go-ipfs-exchange-interface v0.1.0 h1:E/jeLhKucIE7Lp3mEQN+KXpVWSZ7lERxA1G0PTBo0dw=
+github.com/daotl/go-ipfs-exchange-interface v0.1.0/go.mod h1:oTQ4Nhw628U0+ziGQYvqpvhbFMKZCapMvtBqgYV2r6Q=
 github.com/daotl/go-ipfs-routing v0.1.0 h1:LmMSQHJdJey90wkFN6uDXkDDT7h1xn72zPl1jafviso=
 github.com/daotl/go-ipfs-routing v0.1.0/go.mod h1:axDkLo4GHDU5Cc7yVPW76asJBJa/9VR4Om3NYYS0QQE=
+github.com/daotl/go-ipld-channel v0.1.1 h1:MlB43Wva7SGVHGjwH7GSdJ+7RQN/F870C47VwjPWXa8=
+github.com/daotl/go-ipld-channel v0.1.1/go.mod h1:4WtPtJ+Bxyu+GS3bUdhZS4RJfxp1YT3/neDuoT9Usds=
+github.com/daotl/go-ipld-channel v0.2.2 h1:5kPxUFJqkjOkoDEXNsr7vUHW0itp6Ye5AqUlwUTPhXs=
+github.com/daotl/go-ipld-channel v0.2.2/go.mod h1:4WtPtJ+Bxyu+GS3bUdhZS4RJfxp1YT3/neDuoT9Usds=
 github.com/davecgh/go-spew v0.0.0-20171005155431-ecdeabc65495/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
@@ -613,6 +617,7 @@ golang.org/x/sys v0.0.0-20200223170610-d5e6a3e2c0ae/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210309074719-68d13333faf2 h1:46ULzRKLh1CwgRq2dC5SlBzEqqNCi8rreOZnNrbqcIY=
 golang.org/x/sys v0.0.0-20210309074719-68d13333faf2/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/term v0.0.0-20201117132131-f5c789dd3221 h1:/ZHdbVpdR/jk3g30/d4yUL0JU9kksj8+F/bnQUVLGDM=
 golang.org/x/term v0.0.0-20201117132131-f5c789dd3221/go.mod h1:Nr5EML6q2oocZ2LXRh80K7BxOlk5/8JxuGnuhpl+muw=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.2/go.mod h1:bEr9sfX3Q8Zfm5fL9x+3itogRgK3+ptLWKqgva+5dAk=

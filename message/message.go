@@ -5,7 +5,8 @@ import (
 	"errors"
 	"io"
 
-	exchange "github.com/daotl/go-ipfs-exchange-interface"
+	channel "github.com/daotl/go-ipld-channel"
+	"github.com/daotl/go-ipld-channel/pair"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
@@ -25,28 +26,29 @@ type BitSwapMessage interface {
 	Wantlist() []Entry
 
 	// Blocks returns a slice of unique blocks.
-	Blocks() []MsgBlock
+	Blocks() []blocks.Block
 	// BlockPresences returns the list of HAVE / DONT_HAVE in the message
 	BlockPresences() []BlockPresence
-	// Haves returns the Cids for each HAVE
-	Haves() []wantlist.WantKey
-	// DontHaves returns the Cids for each DONT_HAVE
-	DontHaves() []wantlist.WantKey
+	// Haves returns the CidChannelPairs for each HAVE
+	Haves() []pair.CidChannelPair
+	// DontHaves returns the BlockPresences for each DONT_HAVE
+	DontHaves() []pair.CidChannelPair
 	// PendingBytes returns the number of outstanding bytes of data that the
 	// engine has yet to send to the client (because they didn't fit in this
 	// message)
 	PendingBytes() int32
 
 	// AddEntry adds an entry to the Wantlist.
-	AddEntry(key wantlist.WantKey, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int
+	AddEntry(key pair.CidChannelPair, priority int32, wantType pb.Message_Wantlist_WantType,
+		sendDontHave bool) int
 
-	// Cancel adds a CANCEL for the given CID to the message
+	// Cancel adds a CANCEL for the given CidChannelPair to the message
 	// Returns the size of the CANCEL entry in the protobuf
-	Cancel(key wantlist.WantKey) int
+	Cancel(key pair.CidChannelPair) int
 
-	// Remove removes any entries for the given CID. Useful when the want
-	// status for the CID changes when preparing a message.
-	Remove(key wantlist.WantKey)
+	// Remove removes any entries for the given CidChannelPair. Useful when the want
+	// status for the CidChannelPair changes when preparing a message.
+	Remove(key pair.CidChannelPair)
 
 	// Empty indicates whether the message has any information
 	Empty() bool
@@ -57,13 +59,13 @@ type BitSwapMessage interface {
 	Full() bool
 
 	// AddBlock adds a block to the message
-	AddBlock(block MsgBlock)
-	// AddBlockPresence adds a HAVE / DONT_HAVE for the given Cid to the message
-	AddBlockPresence(wantlist.WantKey, pb.Message_BlockPresenceType)
-	// AddHave adds a HAVE for the given Cid to the message
-	AddHave(wantlist.WantKey)
-	// AddDontHave adds a DONT_HAVE for the given Cid to the message
-	AddDontHave(wantlist.WantKey)
+	AddBlock(blocks.Block)
+	// AddBlockPresence adds a HAVE / DONT_HAVE for the given CidChannelPair to the message
+	AddBlockPresence(pair.CidChannelPair, pb.Message_BlockPresenceType)
+	// AddHave adds a HAVE for the given CidChannelPair to the message
+	AddHave(pair.CidChannelPair)
+	// AddDontHave adds a DONT_HAVE for the given CidChannelPair to the message
+	AddDontHave(pair.CidChannelPair)
 	// SetPendingBytes sets the number of bytes of data that are yet to be sent
 	// to the client (because they didn't fit in this message)
 	SetPendingBytes(int32)
@@ -90,11 +92,10 @@ type Exportable interface {
 	ToNetV1(w io.Writer) error
 }
 
-// BlockPresence represents a HAVE / DONT_HAVE for a given Cid
+// BlockPresence represents a HAVE / DONT_HAVE for a given CidChannelPair
 type BlockPresence struct {
-	Cid     cid.Cid
-	Channel exchange.Channel
-	Type    pb.Message_BlockPresenceType
+	Pair pair.CidChannelPair
+	Type pb.Message_BlockPresenceType
 }
 
 // Entry is a wantlist entry in a Bitswap message, with flags indicating
@@ -116,12 +117,12 @@ func (e *Entry) Size() int {
 // Get the entry in protobuf form
 func (e *Entry) ToPB() pb.Message_Wantlist_Entry {
 	return pb.Message_Wantlist_Entry{
-		Block:        pb.Cid{Cid: e.Key.Cid},
+		Block:        pb.Cid{Cid: e.Pair.Cid},
 		Priority:     int32(e.Priority),
 		Cancel:       e.Cancel,
 		WantType:     e.WantType,
 		SendDontHave: e.SendDontHave,
-		Channel:      string(e.Key.Ch),
+		Channel:      e.Pair.Channel.String(),
 	}
 }
 
@@ -133,7 +134,8 @@ func maxEntrySize() int {
 	c := cid.NewCidV0(u.Hash([]byte("cid")))
 	e := Entry{
 		Entry: wantlist.Entry{
-			Key:      wantlist.NewWantKey(c, exchange.Channel("normal-ledger")),
+			// Suppose we use CIDs as IPLD channel identifiers
+			Pair:     pair.CidChannelPair{c, channel.Channel(c.String())},
 			Priority: maxInt32,
 			WantType: pb.Message_Wantlist_Have,
 		},
@@ -143,12 +145,26 @@ func maxEntrySize() int {
 	return e.Size()
 }
 
+var _ BitSwapMessage = (*impl)(nil)
+
 type impl struct {
 	full           bool
-	wantlist       map[wantlist.WantKey]*Entry
-	blocks         map[wantlist.WantKey]MsgBlock
-	blockPresences map[wantlist.WantKey]pb.Message_BlockPresenceType
+	wantlist       map[pair.CidChannelPair]*Entry
+	blocks         map[cid.Cid]blocks.Block
+	blockPresences map[cid.Cid]blockPresenceInfos
 	pendingBytes   int32
+}
+
+type blockPresenceInfos = map[pb.Message_BlockPresenceType]channelMap
+
+type channelMap map[channel.Channel]struct{}
+
+func (m channelMap) toChannelStrings() []string {
+	strs := make([]string, 0, len(m))
+	for chn := range m {
+		strs = append(strs, chn.String())
+	}
+	return strs
 }
 
 // New returns a new, empty bitswap message
@@ -156,14 +172,12 @@ func New(full bool) BitSwapMessage {
 	return newMsg(full)
 }
 
-var msg BitSwapMessage = (*impl)(nil)
-
 func newMsg(full bool) *impl {
 	return &impl{
 		full:           full,
-		wantlist:       make(map[wantlist.WantKey]*Entry),
-		blocks:         make(map[wantlist.WantKey]MsgBlock),
-		blockPresences: make(map[wantlist.WantKey]pb.Message_BlockPresenceType),
+		wantlist:       make(map[pair.CidChannelPair]*Entry),
+		blocks:         make(map[cid.Cid]blocks.Block),
+		blockPresences: make(map[cid.Cid]blockPresenceInfos),
 	}
 }
 
@@ -206,15 +220,19 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 		if !e.Block.Cid.Defined() {
 			return nil, errCidMissing
 		}
-		m.addEntry(wantlist.NewWantKey(e.Block.Cid, exchange.Channel(e.Channel)), e.Priority, e.Cancel, e.WantType, e.SendDontHave)
+		m.addEntry(pair.CidChannelPair{e.Block.Cid, channel.Channel(e.Channel)},
+			e.Priority,
+			e.Cancel,
+			e.WantType,
+			e.SendDontHave)
 	}
 
 	// deprecated
-	//for _, d := range pbm.Blocks {
-	//	// CIDv0, sha256, protobuf only
-	//	b := blocks.NewBlock(d)
-	//	m.AddBlock(b)
-	//}
+	for _, d := range pbm.Blocks {
+		// CIDv0, sha256, protobuf only
+		b := blocks.NewBlock(d)
+		m.AddBlock(b)
+	}
 	//
 
 	for _, b := range pbm.GetPayload() {
@@ -233,14 +251,14 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 			return nil, err
 		}
 
-		m.AddBlock(NewMsgBlock(blk, exchange.Channel(b.Channel)))
+		m.AddBlock(blk)
 	}
 
 	for _, bi := range pbm.GetBlockPresences() {
 		if !bi.Cid.Cid.Defined() {
 			return nil, errCidMissing
 		}
-		m.AddBlockPresence(wantlist.NewWantKey(bi.Cid.Cid, exchange.Channel(bi.Channel)), bi.Type)
+		m.addBlockPresences(bi.Cid.Cid, bi.Type, channel.StringsToChannels(bi.Channels)...)
 	}
 
 	m.pendingBytes = pbm.PendingBytes
@@ -264,8 +282,8 @@ func (m *impl) Wantlist() []Entry {
 	return out
 }
 
-func (m *impl) Blocks() []MsgBlock {
-	bs := make([]MsgBlock, 0, len(m.blocks))
+func (m *impl) Blocks() []blocks.Block {
+	bs := make([]blocks.Block, 0, len(m.blocks))
 	for _, block := range m.blocks {
 		bs = append(bs, block)
 	}
@@ -274,28 +292,32 @@ func (m *impl) Blocks() []MsgBlock {
 
 func (m *impl) BlockPresences() []BlockPresence {
 	bps := make([]BlockPresence, 0, len(m.blockPresences))
-	for c, t := range m.blockPresences {
-		bps = append(bps, BlockPresence{c.Cid, c.Ch, t})
+	for c, infos := range m.blockPresences {
+		for t, chnmap := range infos {
+			for chn := range chnmap {
+				bps = append(bps, BlockPresence{pair.CidChannelPair{c, chn}, t})
+			}
+		}
 	}
 	return bps
 }
 
-func (m *impl) Haves() []wantlist.WantKey {
+func (m *impl) Haves() []pair.CidChannelPair {
 	return m.getBlockPresenceByType(pb.Message_Have)
 }
 
-func (m *impl) DontHaves() []wantlist.WantKey {
+func (m *impl) DontHaves() []pair.CidChannelPair {
 	return m.getBlockPresenceByType(pb.Message_DontHave)
 }
 
-func (m *impl) getBlockPresenceByType(t pb.Message_BlockPresenceType) []wantlist.WantKey {
-	cids := make([]wantlist.WantKey, 0, len(m.blockPresences))
-	for c, bpt := range m.blockPresences {
-		if bpt == t {
-			cids = append(cids, c)
+func (m *impl) getBlockPresenceByType(t pb.Message_BlockPresenceType) []pair.CidChannelPair {
+	pairs := []pair.CidChannelPair{}
+	for c, infos := range m.blockPresences {
+		for chn := range infos[t] {
+			pairs = append(pairs, pair.CidChannelPair{c, chn})
 		}
 	}
-	return cids
+	return pairs
 }
 
 func (m *impl) PendingBytes() int32 {
@@ -306,20 +328,22 @@ func (m *impl) SetPendingBytes(pendingBytes int32) {
 	m.pendingBytes = pendingBytes
 }
 
-func (m *impl) Remove(k wantlist.WantKey) {
-	delete(m.wantlist, k)
+func (m *impl) Remove(p pair.CidChannelPair) {
+	delete(m.wantlist, p)
 }
 
-func (m *impl) Cancel(k wantlist.WantKey) int {
-	return m.addEntry(k, 0, true, pb.Message_Wantlist_Block, false)
+func (m *impl) Cancel(p pair.CidChannelPair) int {
+	return m.addEntry(p, 0, true, pb.Message_Wantlist_Block, false)
 }
 
-func (m *impl) AddEntry(k wantlist.WantKey, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
-	return m.addEntry(k, priority, false, wantType, sendDontHave)
+func (m *impl) AddEntry(p pair.CidChannelPair, priority int32,
+	wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
+	return m.addEntry(p, priority, false, wantType, sendDontHave)
 }
 
-func (m *impl) addEntry(c wantlist.WantKey, priority int32, cancel bool, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
-	e, exists := m.wantlist[c]
+func (m *impl) addEntry(p pair.CidChannelPair, priority int32, cancel bool,
+	wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
+	e, exists := m.wantlist[p]
 	if exists {
 		// Only change priority if want is of the same type
 		if e.WantType == wantType {
@@ -337,54 +361,65 @@ func (m *impl) addEntry(c wantlist.WantKey, priority int32, cancel bool, wantTyp
 		if wantType == pb.Message_Wantlist_Block && e.WantType == pb.Message_Wantlist_Have {
 			e.WantType = wantType
 		}
-		m.wantlist[c] = e
+		m.wantlist[p] = e
 		return 0
 	}
 
 	e = &Entry{
 		Entry: wantlist.Entry{
-			Key:      c,
+			Pair:     p,
 			Priority: priority,
 			WantType: wantType,
 		},
 		SendDontHave: sendDontHave,
 		Cancel:       cancel,
 	}
-	m.wantlist[c] = e
+	m.wantlist[p] = e
 
 	return e.Size()
 }
 
-func (m *impl) AddBlock(b MsgBlock) {
-	key := wantlist.NewWantKey(b.Cid(), b.GetChannel())
-	delete(m.blockPresences, key)
-	m.blocks[key] = b
+func (m *impl) AddBlock(b blocks.Block) {
+	delete(m.blockPresences, b.Cid())
+	m.blocks[b.Cid()] = b
 }
 
-func (m *impl) AddBlockPresence(c wantlist.WantKey, t pb.Message_BlockPresenceType) {
+func (m *impl) AddBlockPresence(p pair.CidChannelPair, t pb.Message_BlockPresenceType) {
+	m.addBlockPresences(p.Cid, t, p.Channel)
+}
+
+func (m *impl) addBlockPresences(c cid.Cid, t pb.Message_BlockPresenceType,
+	chns ...channel.Channel) {
 	if _, ok := m.blocks[c]; ok {
 		return
 	}
-	m.blockPresences[c] = t
+	infos, ok := m.blockPresences[c]
+	if !ok {
+		infos = make(blockPresenceInfos)
+		m.blockPresences[c] = infos
+	}
+	if _, ok := infos[t]; !ok {
+		infos[t] = make(channelMap)
+	}
+	for _, chn := range chns {
+		infos[t][chn] = struct{}{}
+	}
 }
 
-func (m *impl) AddHave(c wantlist.WantKey) {
-	m.AddBlockPresence(c, pb.Message_Have)
+func (m *impl) AddHave(p pair.CidChannelPair) {
+	m.AddBlockPresence(p, pb.Message_Have)
 }
 
-func (m *impl) AddDontHave(c wantlist.WantKey) {
-	m.AddBlockPresence(c, pb.Message_DontHave)
+func (m *impl) AddDontHave(p pair.CidChannelPair) {
+	m.AddBlockPresence(p, pb.Message_DontHave)
 }
 
 func (m *impl) Size() int {
 	size := 0
 	for _, block := range m.blocks {
 		size += len(block.RawData())
-		// TODO: add ch
 	}
-	for c := range m.blockPresences {
-		size += BlockPresenceSize(c)
-	}
+	size += m.BlockPresencesSize()
 	for _, e := range m.wantlist {
 		size += e.Size()
 	}
@@ -392,12 +427,18 @@ func (m *impl) Size() int {
 	return size
 }
 
-func BlockPresenceSize(c wantlist.WantKey) int {
-	return (&pb.Message_BlockPresence{
-		Cid:     pb.Cid{Cid: c.Cid},
-		Channel: string(c.Ch),
-		Type:    pb.Message_Have,
-	}).Size()
+func (m *impl) BlockPresencesSize() int {
+	size := 0
+	for c, infos := range m.blockPresences {
+		for t, chnmap := range infos {
+			size += (&pb.Message_BlockPresence{
+				Cid:      pb.Cid{Cid: c},
+				Type:     t,
+				Channels: chnmap.toChannelStrings(),
+			}).Size()
+		}
+	}
+	return size
 }
 
 // FromNet generates a new BitswapMessage from incoming data on an io.Reader.
@@ -451,19 +492,20 @@ func (m *impl) ToProtoV1() *pb.Message {
 	pbm.Payload = make([]pb.Message_Block, 0, len(blocks))
 	for _, b := range blocks {
 		pbm.Payload = append(pbm.Payload, pb.Message_Block{
-			Data:    b.RawData(),
-			Prefix:  b.Cid().Prefix().Bytes(),
-			Channel: string(b.GetChannel()),
+			Data:   b.RawData(),
+			Prefix: b.Cid().Prefix().Bytes(),
 		})
 	}
 
 	pbm.BlockPresences = make([]pb.Message_BlockPresence, 0, len(m.blockPresences))
-	for c, t := range m.blockPresences {
-		pbm.BlockPresences = append(pbm.BlockPresences, pb.Message_BlockPresence{
-			Cid:     pb.Cid{Cid: c.Cid},
-			Type:    t,
-			Channel: string(c.Ch),
-		})
+	for c, infos := range m.blockPresences {
+		for t, chnmap := range infos {
+			pbm.BlockPresences = append(pbm.BlockPresences, pb.Message_BlockPresence{
+				Cid:      pb.Cid{Cid: c},
+				Type:     t,
+				Channels: chnmap.toChannelStrings(),
+			})
+		}
 	}
 
 	pbm.PendingBytes = m.PendingBytes()
